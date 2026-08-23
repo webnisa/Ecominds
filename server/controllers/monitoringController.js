@@ -1,23 +1,203 @@
 import PlantData from "../models/PlantData.js";
 import Plant from "../models/Plant.js";
+import { getAuth } from "@clerk/express";
+// ============================================================
+// GET ALL PLANTS MONITORING
+// GET /api/monitoring
+// ============================================================
+
+export const getAllPlantsMonitoring = async (req, res) => {
+  try {
+    const clerkId = req.userId;
+
+    if (!clerkId) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
+
+    // --------------------------------------------------------
+    // GET ALL USER PLANTS
+    // --------------------------------------------------------
+
+    const plants = await Plant.find({
+      userId: clerkId,
+    })
+      .sort({
+        createdAt: -1,
+      })
+      .lean();
+
+    // --------------------------------------------------------
+    // GET SENSOR DATA FOR EACH PLANT
+    // --------------------------------------------------------
+
+    const monitoringData = await Promise.all(
+      plants.map(async (plant) => {
+        // Latest 30 readings
+        const history = await PlantData.find({
+          plantId: plant._id,
+          userId: clerkId,
+        })
+          .sort({
+            recordedAt: -1,
+          })
+          .limit(30)
+          .lean();
+
+        // Latest reading
+        const latestSensor =
+          history.length > 0
+            ? history[0]
+            : null;
+
+        // Graph ke liye oldest → newest
+        const chartHistory =
+          [...history].reverse();
+
+        return {
+          plant: {
+  id: plant._id,
+
+  plantName:
+    plant.plantName,
+
+  plantType:
+    plant.plantType,
+
+  location:
+    plant.location,
+
+  image:
+    plant.image || "",
+
+  healthScore:
+    plant.healthScore || 0,
+
+  health:
+    plant.health || "Uncertain",
+
+  lastHealthCheck:
+    plant.lastHealthCheck || null,
+
+  lastWatered:
+    plant.lastWatered || null,
+
+  nutrients:
+    plant.nutrients || 0,
+
+  aiInsight:
+    plant.aiInsight ||
+    "Keep monitoring your plant regularly.",
+},
+        }
+      })
+    );
+
+    // ========================================================
+    // OVERALL SUMMARY
+    // ========================================================
+
+    const totalPlants =
+      monitoringData.length;
+
+    let healthyPlants = 0;
+    let warningPlants = 0;
+    let criticalPlants = 0;
+    let plantsNeedWater = 0;
+
+    monitoringData.forEach(
+      (item) => {
+        const score =
+          Number(
+            item.plant.healthScore
+          );
+
+        // Health
+        if (!Number.isNaN(score)) {
+          if (score >= 75) {
+            healthyPlants++;
+          } else if (score >= 40) {
+            warningPlants++;
+          } else {
+            criticalPlants++;
+          }
+        }
+
+        // Moisture
+        const moisture =
+          item.latestSensor
+            ?.soilMoisture;
+
+        if (
+          moisture !== null &&
+          moisture !== undefined &&
+          Number(moisture) < 30
+        ) {
+          plantsNeedWater++;
+        }
+      }
+    );
+
+    return res.status(200).json({
+      success: true,
+
+      summary: {
+        totalPlants,
+        healthyPlants,
+        warningPlants,
+        criticalPlants,
+        plantsNeedWater,
+      },
+
+      plants: monitoringData,
+    });
+  } catch (error) {
+    console.error(
+      "❌ All plants monitoring error:",
+      error
+    );
+
+    return res.status(500).json({
+      success: false,
+      message:
+        "Failed to fetch monitoring data",
+      error: error.message,
+    });
+  }
+};
+
 
 // ============================================================
-// GET PLANT MONITORING HISTORY
+// GET SINGLE PLANT MONITORING
+// GET /api/monitoring/:plantId
 // ============================================================
 
-export const getPlantMonitoring = async (req, res) => {
+export const getPlantMonitoring = async (
+  req,
+  res
+) => {
   try {
     const clerkId = req.userId;
     const { plantId } = req.params;
 
+    if (!clerkId) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
+
     // --------------------------------------------------------
-    // Check plant belongs to logged-in user
+    // CHECK PLANT
     // --------------------------------------------------------
 
-    const plant = await Plant.findOne({
-      _id: plantId,
-      userId: clerkId,
-    });
+    const plant =
+      await Plant.findOne({
+        _id: plantId,
+        userId: clerkId,
+      }).lean();
 
     if (!plant) {
       return res.status(404).json({
@@ -27,19 +207,26 @@ export const getPlantMonitoring = async (req, res) => {
     }
 
     // --------------------------------------------------------
-    // Get sensor history
+    // SENSOR HISTORY
     // --------------------------------------------------------
 
-    const history = await PlantData.find({
-      plantId,
-      userId: clerkId,
-    })
-      .sort({
-        recordedAt: 1,
+    const history =
+      await PlantData.find({
+        plantId,
+        userId: clerkId,
       })
-      .limit(100);
+        .sort({
+          recordedAt: 1,
+        })
+        .limit(100)
+        .lean();
 
-    return res.json({
+    const latestSensor =
+      history.length > 0
+        ? history[history.length - 1]
+        : null;
+
+    return res.status(200).json({
       success: true,
 
       plant: {
@@ -47,22 +234,27 @@ export const getPlantMonitoring = async (req, res) => {
         plantName: plant.plantName,
         plantType: plant.plantType,
         location: plant.location,
-        healthScore: plant.healthScore,
+        healthScore:
+          plant.healthScore,
         health: plant.health,
-        lastHealthCheck: plant.lastHealthCheck,
+        lastHealthCheck:
+          plant.lastHealthCheck,
       },
+
+      latestSensor,
 
       history,
     });
   } catch (error) {
     console.error(
-      "Monitoring fetch error:",
+      "❌ Monitoring fetch error:",
       error
     );
 
     return res.status(500).json({
       success: false,
-      message: "Failed to fetch monitoring data",
+      message:
+        "Failed to fetch monitoring data",
       error: error.message,
     });
   }
@@ -71,11 +263,13 @@ export const getPlantMonitoring = async (req, res) => {
 
 // ============================================================
 // ADD SENSOR DATA
-//
-// ESP / IoT can use this API
+// POST /api/monitoring/sensor
 // ============================================================
 
-export const addSensorData = async (req, res) => {
+export const addSensorData = async (
+  req,
+  res
+) => {
   try {
     const clerkId = req.userId;
 
@@ -87,21 +281,30 @@ export const addSensorData = async (req, res) => {
       light,
     } = req.body;
 
+    if (!clerkId) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
+
     if (!plantId) {
       return res.status(400).json({
         success: false,
-        message: "plantId is required",
+        message:
+          "plantId is required",
       });
     }
 
     // --------------------------------------------------------
-    // Check plant
+    // CHECK PLANT
     // --------------------------------------------------------
 
-    const plant = await Plant.findOne({
-      _id: plantId,
-      userId: clerkId,
-    });
+    const plant =
+      await Plant.findOne({
+        _id: plantId,
+        userId: clerkId,
+      });
 
     if (!plant) {
       return res.status(404).json({
@@ -111,51 +314,80 @@ export const addSensorData = async (req, res) => {
     }
 
     // --------------------------------------------------------
-    // Save sensor reading
+    // CONVERT VALUES SAFELY
     // --------------------------------------------------------
 
-    const sensorData = await PlantData.create({
-      userId: clerkId,
-      plantId,
+    const convertNumber = (
+      value
+    ) => {
+      if (
+        value === undefined ||
+        value === null ||
+        value === ""
+      ) {
+        return null;
+      }
 
-      soilMoisture:
-        soilMoisture !== undefined
-          ? Number(soilMoisture)
-          : null,
+      const number =
+        Number(value);
 
-      temperature:
-        temperature !== undefined
-          ? Number(temperature)
-          : null,
+      return Number.isFinite(number)
+        ? number
+        : null;
+    };
 
-      humidity:
-        humidity !== undefined
-          ? Number(humidity)
-          : null,
+    // --------------------------------------------------------
+    // SAVE SENSOR DATA
+    // --------------------------------------------------------
 
-      light:
-        light !== undefined
-          ? Number(light)
-          : null,
+    const sensorData =
+      await PlantData.create({
+        userId: clerkId,
 
-      recordedAt: new Date(),
-    });
+        plantId,
+
+        soilMoisture:
+          convertNumber(
+            soilMoisture
+          ),
+
+        temperature:
+          convertNumber(
+            temperature
+          ),
+
+        humidity:
+          convertNumber(
+            humidity
+          ),
+
+        light:
+          convertNumber(light),
+
+        recordedAt:
+          new Date(),
+      });
 
     return res.status(201).json({
       success: true,
-      message: "Sensor data saved 🌱",
+
+      message:
+        "Sensor data saved 🌱",
+
       data: sensorData,
     });
   } catch (error) {
     console.error(
-      "Sensor data error:",
+      "❌ Sensor data error:",
       error
     );
 
     return res.status(500).json({
       success: false,
-      message: "Failed to save sensor data",
+      message:
+        "Failed to save sensor data",
       error: error.message,
     });
   }
 };
+

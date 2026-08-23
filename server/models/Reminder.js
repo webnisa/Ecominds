@@ -18,14 +18,12 @@ const reminderSchema = new mongoose.Schema(
     type: {
       type: String,
       enum: [
-        "low_moisture",
-        "overwatering",
-        "high_temperature",
-        "low_humidity",
-        "care_missed",
-        "general",
+        "WATERING",
+        "MISSED_WATERING",
+        "HEALTH",
+        "GENERAL",
       ],
-      required: true,
+      default: "WATERING",
     },
 
     title: {
@@ -38,20 +36,26 @@ const reminderSchema = new mongoose.Schema(
       required: true,
     },
 
-    priority: {
-      type: String,
-      enum: ["low", "medium", "high"],
-      default: "medium",
-    },
-
     isRead: {
-      type: Boolean,
-      default: false,
-    },
+  type: Boolean,
+  default: false,
+},
 
-    expiresAt: {
+status: {
+  type: String,
+  enum: ["pending", "completed", "missed"],
+  default: "pending",
+},
+
+dueAt: {
+  type: Date,
+  default: Date.now,
+},
+
+
+    createdAt: {
       type: Date,
-      default: null,
+      default: Date.now,
     },
   },
   {
@@ -59,6 +63,8 @@ const reminderSchema = new mongoose.Schema(
   }
 );
 
-const Reminder = mongoose.model("Reminder", reminderSchema);
+const Reminder =
+  mongoose.models.Reminder ||
+  mongoose.model("Reminder", reminderSchema);
 
 export default Reminder;

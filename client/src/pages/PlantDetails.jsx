@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { useAuth } from "@clerk/clerk-react";
+
 import {
   ArrowLeft,
   Droplets,
@@ -14,81 +16,245 @@ import {
   Clock3,
 } from "lucide-react";
 
+const BACKEND_URL =
+  import.meta.env.VITE_BACKEND_URL ||
+  "http://localhost:5000";
+
 function PlantDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
 
-  const [plant, setPlant] = useState(null);
-  const [history, setHistory] = useState([]);
-  const [activeGraph, setActiveGraph] = useState("moisture");
-  const [pumpStatus, setPumpStatus] = useState(false);
-  const [watering, setWatering] = useState(false);
+  // =====================================================
+  // CLERK
+  // =====================================================
+
+  const { getToken } = useAuth();
 
   // =====================================================
-  // DEMO DATA ONLY
-  // Backend abhi connect nahi hai
+  // STATE
+  // =====================================================
+
+  const [plant, setPlant] = useState(null);
+  const [history, setHistory] = useState([]);
+
+  const [activeGraph, setActiveGraph] =
+    useState("moisture");
+
+  const [pumpStatus, setPumpStatus] =
+    useState(false);
+
+  const [watering, setWatering] =
+    useState(false);
+
+  const [loading, setLoading] =
+    useState(true);
+
+  const [error, setError] =
+    useState("");
+
+  // =====================================================
+  // FETCH REAL PLANT MONITORING DATA
+  // =====================================================
+
+  const fetchPlantDetails = async () => {
+    try {
+      setLoading(true);
+      setError("");
+
+      const token = await getToken();
+
+      if (!token) {
+        throw new Error(
+          "User authentication token not found."
+        );
+      }
+
+      console.log(
+        "🌱 Fetching plant monitoring:",
+        id
+      );
+
+      const response = await fetch(
+        `${BACKEND_URL}/api/monitoring/${id}`,
+        {
+          method: "GET",
+
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: "application/json",
+          },
+        }
+      );
+
+      const data = await response.json();
+
+      console.log(
+        "🌱 Plant monitoring response:",
+        data
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          data.message ||
+            "Failed to fetch plant monitoring data"
+        );
+      }
+
+      if (!data.success) {
+        throw new Error(
+          data.message ||
+            "Failed to load plant"
+        );
+      }
+
+      const backendPlant =
+        data.plant || {};
+
+      const backendHistory =
+        Array.isArray(data.history)
+          ? data.history
+          : [];
+
+      // =================================================
+      // LATEST SENSOR READING
+      // =================================================
+
+      const latestData =
+        backendHistory.length > 0
+          ? backendHistory[
+              backendHistory.length - 1
+            ]
+          : null;
+
+      // =================================================
+      // REAL PLANT DATA
+      // =================================================
+
+      setPlant({
+        _id:
+          backendPlant.id || id,
+
+        name:
+          backendPlant.plantName ||
+          "Unnamed Plant",
+
+        type:
+          backendPlant.plantType ||
+          "Plant",
+
+        location:
+          backendPlant.location ||
+          "Unknown",
+
+        image:
+          backendPlant.image ||
+          "",
+
+        healthScore:
+          Number(
+            backendPlant.healthScore
+          ) || 0,
+
+        health:
+          backendPlant.health ||
+          "Uncertain",
+
+        moisture:
+          latestData?.soilMoisture ??
+          0,
+
+        temperature:
+          latestData?.temperature ??
+          0,
+
+        humidity:
+          latestData?.humidity ??
+          0,
+
+        light:
+          latestData?.light ??
+          0,
+
+        // Nutrients abhi PlantData model me nahi hai
+        nutrients:
+          backendPlant.nutrients ??
+          0,
+
+        lastWatered:
+          backendPlant.lastWatered ||
+          "No watering record",
+
+        aiInsight:
+          backendPlant.aiInsight ||
+          "Keep monitoring your plant regularly.",
+      });
+
+      // =================================================
+      // HISTORY FOR GRAPH
+      // =================================================
+
+      const formattedHistory =
+        backendHistory.map((item) => ({
+          date: new Date(
+            item.recordedAt
+          ).toLocaleDateString(
+            "en-IN",
+            {
+              day: "2-digit",
+              month: "short",
+            }
+          ),
+
+          moisture:
+            Number(
+              item.soilMoisture
+            ) || 0,
+
+          temperature:
+            Number(
+              item.temperature
+            ) || 0,
+
+          humidity:
+            Number(
+              item.humidity
+            ) || 0,
+
+          light:
+            Number(item.light) || 0,
+        }));
+
+      setHistory(
+        formattedHistory
+      );
+
+    } catch (err) {
+      console.error(
+        "❌ Plant details error:",
+        err
+      );
+
+      setError(
+        err.message ||
+          "Failed to load plant data."
+      );
+
+      setPlant(null);
+      setHistory([]);
+
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // =====================================================
+  // INITIAL LOAD
   // =====================================================
 
   useEffect(() => {
-    const demoPlant = {
-      _id: id || "demo-plant",
-      name: "Tomato Plant",
-      type: "Vegetable",
-      location: "Balcony",
-
-      image: "",
-
-      healthScore: 87,
-      health: "Excellent",
-
-      moisture: 42,
-      temperature: 28,
-      humidity: 64,
-      nutrients: 68,
-
-      light: "Good",
-
-      lastWatered: "Today, 9:30 AM",
-
-      aiInsight:
-        "Your plant is doing well. Soil moisture is currently at a healthy level. Keep monitoring it regularly.",
-    };
-
-    const demoHistory = [
-      {
-        date: "Mon",
-        moisture: 56,
-        temperature: 26,
-        humidity: 61,
-      },
-      {
-        date: "Tue",
-        moisture: 49,
-        temperature: 27,
-        humidity: 63,
-      },
-      {
-        date: "Wed",
-        moisture: 45,
-        temperature: 28,
-        humidity: 65,
-      },
-      {
-        date: "Thu",
-        moisture: 38,
-        temperature: 29,
-        humidity: 67,
-      },
-      {
-        date: "Fri",
-        moisture: 42,
-        temperature: 28,
-        humidity: 64,
-      },
-    ];
-
-    setPlant(demoPlant);
-    setHistory(demoHistory);
+    if (id) {
+      fetchPlantDetails();
+    }
   }, [id]);
 
   // =====================================================
@@ -98,15 +264,27 @@ function PlantDetails() {
   const handleWaterPlant = () => {
     setWatering(true);
 
+    // Abhi UI action hai.
+    // Backend watering API connect karenge next step me.
+
     setTimeout(() => {
-      setPlant((previous) => ({
-        ...previous,
-        moisture: Math.min(
-          Number(previous.moisture) + 20,
-          100
-        ),
-        lastWatered: "Just now",
-      }));
+      setPlant((previous) => {
+        if (!previous) return previous;
+
+        return {
+          ...previous,
+
+          moisture: Math.min(
+            Number(
+              previous.moisture || 0
+            ) + 20,
+            100
+          ),
+
+          lastWatered:
+            "Just now",
+        };
+      });
 
       setWatering(false);
     }, 700);
@@ -118,6 +296,8 @@ function PlantDetails() {
 
   const handlePump = (status) => {
     setPumpStatus(status);
+
+    // Pump backend next step me connect karenge.
   };
 
   // =====================================================
@@ -125,14 +305,14 @@ function PlantDetails() {
   // =====================================================
 
   const handleRefresh = () => {
-    window.location.reload();
+    fetchPlantDetails();
   };
 
   // =====================================================
   // LOADING
   // =====================================================
 
-  if (!plant) {
+  if (loading) {
     return (
       <div className="min-h-screen bg-[#f5f9f5] flex items-center justify-center">
         <div className="text-center">
@@ -143,7 +323,7 @@ function PlantDetails() {
           />
 
           <p className="mt-3 text-sm text-[#718078]">
-            Loading plant...
+            Loading plant data...
           </p>
 
         </div>
@@ -152,30 +332,102 @@ function PlantDetails() {
   }
 
   // =====================================================
+  // ERROR
+  // =====================================================
+
+  if (error || !plant) {
+    return (
+      <div className="min-h-screen bg-[#f5f9f5] flex items-center justify-center px-5">
+
+        <div className="text-center">
+
+          <Sprout
+            size={50}
+            className="mx-auto text-red-400"
+          />
+
+          <h2 className="mt-4 text-xl font-bold text-[#163d27]">
+            Unable to load plant
+          </h2>
+
+          <p className="mt-2 text-sm text-[#718078]">
+            {error || "Plant not found"}
+          </p>
+
+          <button
+            onClick={() =>
+              navigate("/plants")
+            }
+            className="
+              mt-5
+              px-5
+              py-2.5
+              rounded-xl
+              bg-[#166534]
+              text-white
+              text-sm
+              font-semibold
+            "
+          >
+            Back to My Plants
+          </button>
+
+        </div>
+
+      </div>
+    );
+  }
+
+  // =====================================================
   // VALUES
   // =====================================================
 
-  const moisture = Number(plant.moisture);
-  const temperature = Number(plant.temperature);
-  const humidity = Number(plant.humidity);
-  const nutrients = Number(plant.nutrients);
-  const healthScore = Number(plant.healthScore);
+  const moisture =
+    Number(plant.moisture) || 0;
+
+  const temperature =
+    Number(plant.temperature) || 0;
+
+  const humidity =
+    Number(plant.humidity) || 0;
+
+  const nutrients =
+    Number(plant.nutrients) || 0;
+
+  const healthScore =
+    Number(plant.healthScore) || 0;
 
   // =====================================================
   // GRAPH VALUE
   // =====================================================
 
   const getGraphValue = (item) => {
-    if (activeGraph === "temperature") {
-      return Number(item.temperature);
+    if (
+      activeGraph ===
+      "temperature"
+    ) {
+      return Number(
+        item.temperature
+      ) || 0;
     }
 
-    if (activeGraph === "humidity") {
-      return Number(item.humidity);
+    if (
+      activeGraph ===
+      "humidity"
+    ) {
+      return Number(
+        item.humidity
+      ) || 0;
     }
 
-    return Number(item.moisture);
+    return Number(
+      item.moisture
+    ) || 0;
   };
+
+  // =====================================================
+  // MAIN UI
+  // =====================================================
 
   return (
     <main className="min-h-screen bg-[#f5f9f5]">
@@ -188,10 +440,10 @@ function PlantDetails() {
 
         <div className="max-w-[1400px] mx-auto">
 
-          {/* BACK */}
-
           <button
-            onClick={() => navigate("/plants")}
+            onClick={() =>
+              navigate("/plants")
+            }
             className="
               flex
               items-center
@@ -207,9 +459,6 @@ function PlantDetails() {
 
             My Plants
           </button>
-
-
-          {/* TITLE */}
 
           <div
             className="
@@ -238,7 +487,6 @@ function PlantDetails() {
                   {plant.name}
                 </h1>
 
-
                 <span
                   className="
                     px-3
@@ -255,7 +503,6 @@ function PlantDetails() {
 
               </div>
 
-
               <p
                 className="
                   mt-1
@@ -263,13 +510,11 @@ function PlantDetails() {
                   text-[#718078]
                 "
               >
-                {plant.type} • {plant.location}
+                {plant.type} •{" "}
+                {plant.location}
               </p>
 
             </div>
-
-
-            {/* REFRESH */}
 
             <button
               onClick={handleRefresh}
@@ -302,7 +547,6 @@ function PlantDetails() {
 
       </section>
 
-
       {/* ==================================================
           HERO
       ================================================== */}
@@ -319,9 +563,7 @@ function PlantDetails() {
           "
         >
 
-          {/* ==================================================
-              PLANT IMAGE
-          ================================================== */}
+          {/* IMAGE */}
 
           <div
             className="
@@ -339,7 +581,19 @@ function PlantDetails() {
             {plant.image ? (
 
               <img
-                src={plant.image}
+                src={
+                  plant.image.startsWith(
+                    "http"
+                  )
+                    ? plant.image
+                    : `${BACKEND_URL}${
+                        plant.image.startsWith(
+                          "/"
+                        )
+                          ? ""
+                          : "/"
+                      }${plant.image}`
+                }
                 alt={plant.name}
                 className="
                   w-full
@@ -370,9 +624,6 @@ function PlantDetails() {
               </div>
 
             )}
-
-
-            {/* IMAGE LABEL */}
 
             <div
               className="
@@ -413,10 +664,7 @@ function PlantDetails() {
 
           </div>
 
-
-          {/* ==================================================
-              HEALTH
-          ================================================== */}
+          {/* HEALTH */}
 
           <div
             className="
@@ -431,38 +679,19 @@ function PlantDetails() {
             "
           >
 
-            <div
-              className="
-                flex
-                items-center
-                justify-between
-              "
-            >
+            <div className="flex items-center justify-between">
 
               <div>
 
-                <p
-                  className="
-                    text-[12px]
-                    text-[#718078]
-                  "
-                >
+                <p className="text-[12px] text-[#718078]">
                   Plant Health
                 </p>
 
-                <h2
-                  className="
-                    mt-1
-                    text-[20px]
-                    font-bold
-                    text-[#163d27]
-                  "
-                >
+                <h2 className="mt-1 text-[20px] font-bold text-[#163d27]">
                   {plant.health}
                 </h2>
 
               </div>
-
 
               <div
                 className="
@@ -485,17 +714,7 @@ function PlantDetails() {
 
             </div>
 
-
-            {/* HEALTH CIRCLE */}
-
-            <div
-              className="
-                flex
-                items-center
-                justify-center
-                py-7
-              "
-            >
+            <div className="flex items-center justify-center py-7">
 
               <div
                 className="
@@ -508,8 +727,12 @@ function PlantDetails() {
                 "
                 style={{
                   background: `conic-gradient(
-                    #166534 ${healthScore * 3.6}deg,
-                    #e5eee7 ${healthScore * 3.6}deg
+                    #166534 ${
+                      healthScore * 3.6
+                    }deg,
+                    #e5eee7 ${
+                      healthScore * 3.6
+                    }deg
                   )`,
                 }}
               >
@@ -527,22 +750,11 @@ function PlantDetails() {
                   "
                 >
 
-                  <span
-                    className="
-                      text-[34px]
-                      font-bold
-                      text-[#14532d]
-                    "
-                  >
+                  <span className="text-[34px] font-bold text-[#14532d]">
                     {healthScore}%
                   </span>
 
-                  <span
-                    className="
-                      text-[10px]
-                      text-[#7b877f]
-                    "
-                  >
+                  <span className="text-[10px] text-[#7b877f]">
                     Health Score
                   </span>
 
@@ -551,7 +763,6 @@ function PlantDetails() {
               </div>
 
             </div>
-
 
             <div
               className="
@@ -562,13 +773,8 @@ function PlantDetails() {
               "
             >
 
-              <p
-                className="
-                  text-[11px]
-                  text-[#5f7767]
-                "
-              >
-                🌱 Your plant is currently in good condition.
+              <p className="text-[11px] text-[#5f7767]">
+                🌱 Real-time plant monitoring data
               </p>
 
             </div>
@@ -578,7 +784,6 @@ function PlantDetails() {
         </div>
 
       </section>
-
 
       {/* ==================================================
           CURRENT CONDITIONS
@@ -590,28 +795,15 @@ function PlantDetails() {
 
           <div className="mb-4">
 
-            <h2
-              className="
-                text-[21px]
-                font-bold
-                text-[#163d27]
-              "
-            >
+            <h2 className="text-[21px] font-bold text-[#163d27]">
               Current Conditions
             </h2>
 
-            <p
-              className="
-                mt-1
-                text-[12px]
-                text-[#7b877f]
-              "
-            >
-              Current information about your plant
+            <p className="mt-1 text-[12px] text-[#7b877f]">
+              Latest sensor information from your plant
             </p>
 
           </div>
-
 
           <div
             className="
@@ -636,30 +828,31 @@ function PlantDetails() {
               iconClass="bg-[#e8f2ff] text-[#2878df]"
             />
 
-
             <ConditionCard
               icon={<Thermometer size={21} />}
               title="Temperature"
               value={`${temperature}°C`}
-              status="Normal"
+              status="Sensor Reading"
               iconClass="bg-[#fff2df] text-[#df8b00]"
             />
-
 
             <ConditionCard
               icon={<Activity size={21} />}
               title="Humidity"
               value={`${humidity}%`}
-              status="Good"
+              status="Sensor Reading"
               iconClass="bg-[#eeeaff] text-[#6753c9]"
             />
-
 
             <ConditionCard
               icon={<FlaskConical size={21} />}
               title="Nutrients"
               value={`${nutrients}%`}
-              status="Healthy"
+              status={
+                nutrients > 0
+                  ? "Sensor Reading"
+                  : "Not Available"
+              }
               iconClass="bg-[#e7f5e9] text-[#267342]"
             />
 
@@ -668,7 +861,6 @@ function PlantDetails() {
         </div>
 
       </section>
-
 
       {/* ==================================================
           GRAPH + WATERING
@@ -686,9 +878,7 @@ function PlantDetails() {
           "
         >
 
-          {/* ==================================================
-              GRAPH
-          ================================================== */}
+          {/* GRAPH */}
 
           <div
             className="
@@ -715,30 +905,15 @@ function PlantDetails() {
 
               <div>
 
-                <h2
-                  className="
-                    text-[19px]
-                    font-bold
-                    text-[#163d27]
-                  "
-                >
+                <h2 className="text-[19px] font-bold text-[#163d27]">
                   Sensor History
                 </h2>
 
-                <p
-                  className="
-                    mt-1
-                    text-[11px]
-                    text-[#7b877f]
-                  "
-                >
-                  Monitor your plant over the last few days
+                <p className="mt-1 text-[11px] text-[#7b877f]">
+                  Real sensor readings from MongoDB
                 </p>
 
               </div>
-
-
-              {/* GRAPH TABS */}
 
               <div
                 className="
@@ -751,22 +926,43 @@ function PlantDetails() {
               >
 
                 <GraphButton
-                  active={activeGraph === "moisture"}
-                  onClick={() => setActiveGraph("moisture")}
+                  active={
+                    activeGraph ===
+                    "moisture"
+                  }
+                  onClick={() =>
+                    setActiveGraph(
+                      "moisture"
+                    )
+                  }
                 >
                   Moisture
                 </GraphButton>
 
                 <GraphButton
-                  active={activeGraph === "temperature"}
-                  onClick={() => setActiveGraph("temperature")}
+                  active={
+                    activeGraph ===
+                    "temperature"
+                  }
+                  onClick={() =>
+                    setActiveGraph(
+                      "temperature"
+                    )
+                  }
                 >
                   Temperature
                 </GraphButton>
 
                 <GraphButton
-                  active={activeGraph === "humidity"}
-                  onClick={() => setActiveGraph("humidity")}
+                  active={
+                    activeGraph ===
+                    "humidity"
+                  }
+                  onClick={() =>
+                    setActiveGraph(
+                      "humidity"
+                    )
+                  }
                 >
                   Humidity
                 </GraphButton>
@@ -774,9 +970,6 @@ function PlantDetails() {
               </div>
 
             </div>
-
-
-            {/* GRAPH */}
 
             <div
               className="
@@ -790,79 +983,84 @@ function PlantDetails() {
               "
             >
 
-              {history.map((item, index) => {
+              {history.length === 0 ? (
 
-                const value = getGraphValue(item);
+                <div className="w-full text-center text-sm text-[#849087]">
+                  No sensor data available yet.
+                </div>
 
-                const height =
-                  activeGraph === "temperature"
-                    ? Math.max(value * 5, 20)
-                    : Math.max(value * 1.7, 10);
+              ) : (
 
-                return (
-                  <div
-                    key={index}
-                    className="
-                      flex-1
-                      h-full
-                      flex
-                      flex-col
-                      justify-end
-                      items-center
-                      gap-2
-                    "
-                  >
+                history.map(
+                  (item, index) => {
 
-                    <span
-                      className="
-                        text-[9px]
-                        font-semibold
-                        text-[#527060]
-                      "
-                    >
-                      {value}
-                    </span>
+                    const value =
+                      getGraphValue(
+                        item
+                      );
 
+                    const height =
+                      activeGraph ===
+                      "temperature"
+                        ? Math.max(
+                            value * 5,
+                            20
+                          )
+                        : Math.max(
+                            value * 1.7,
+                            10
+                          );
 
-                    <div
-                      className="
-                        w-full
-                        max-w-[42px]
-                        rounded-t-xl
-                        bg-[#65a873]
-                        transition-all
-                      "
-                      style={{
-                        height: `${Math.min(
-                          height,
-                          180
-                        )}px`,
-                      }}
-                    />
+                    return (
+                      <div
+                        key={index}
+                        className="
+                          flex-1
+                          h-full
+                          flex
+                          flex-col
+                          justify-end
+                          items-center
+                          gap-2
+                        "
+                      >
 
+                        <span className="text-[9px] font-semibold text-[#527060]">
+                          {value}
+                        </span>
 
-                    <span
-                      className="
-                        text-[9px]
-                        text-[#89948d]
-                      "
-                    >
-                      {item.date}
-                    </span>
+                        <div
+                          className="
+                            w-full
+                            max-w-[42px]
+                            rounded-t-xl
+                            bg-[#65a873]
+                            transition-all
+                          "
+                          style={{
+                            height: `${Math.min(
+                              height,
+                              180
+                            )}px`,
+                          }}
+                        />
 
-                  </div>
-                );
+                        <span className="text-[9px] text-[#89948d]">
+                          {item.date}
+                        </span>
 
-              })}
+                      </div>
+                    );
+                  }
+                )
+
+              )}
 
             </div>
 
           </div>
 
-
-          {/* ==================================================
-              WATERING
-          ================================================== */}
+          {/* WATERING */}
 
           <div
             className="
@@ -874,13 +1072,7 @@ function PlantDetails() {
             "
           >
 
-            <div
-              className="
-                flex
-                items-center
-                gap-3
-              "
-            >
+            <div className="flex items-center gap-3">
 
               <div
                 className="
@@ -901,34 +1093,19 @@ function PlantDetails() {
 
               </div>
 
-
               <div>
 
-                <h2
-                  className="
-                    text-[18px]
-                    font-bold
-                    text-[#163d27]
-                  "
-                >
+                <h2 className="text-[18px] font-bold text-[#163d27]">
                   Watering
                 </h2>
 
-                <p
-                  className="
-                    text-[10px]
-                    text-[#7b877f]
-                  "
-                >
+                <p className="text-[10px] text-[#7b877f]">
                   Keep your plant hydrated
                 </p>
 
               </div>
 
             </div>
-
-
-            {/* LAST WATERED */}
 
             <div
               className="
@@ -939,13 +1116,7 @@ function PlantDetails() {
               "
             >
 
-              <div
-                className="
-                  flex
-                  items-center
-                  gap-3
-                "
-              >
+              <div className="flex items-center gap-3">
 
                 <Clock3
                   size={18}
@@ -954,23 +1125,11 @@ function PlantDetails() {
 
                 <div>
 
-                  <p
-                    className="
-                      text-[10px]
-                      text-[#829088]
-                    "
-                  >
+                  <p className="text-[10px] text-[#829088]">
                     Last watered
                   </p>
 
-                  <p
-                    className="
-                      mt-0.5
-                      text-[13px]
-                      font-semibold
-                      text-[#163d27]
-                    "
-                  >
+                  <p className="mt-0.5 text-[13px] font-semibold text-[#163d27]">
                     {plant.lastWatered}
                   </p>
 
@@ -980,11 +1139,10 @@ function PlantDetails() {
 
             </div>
 
-
-            {/* MANUAL WATER */}
-
             <button
-              onClick={handleWaterPlant}
+              onClick={
+                handleWaterPlant
+              }
               disabled={watering}
               className="
                 mt-4
@@ -1013,9 +1171,6 @@ function PlantDetails() {
 
             </button>
 
-
-            {/* AUTOMATIC PUMP */}
-
             <div
               className="
                 mt-5
@@ -1026,21 +1181,9 @@ function PlantDetails() {
               "
             >
 
-              <div
-                className="
-                  flex
-                  items-center
-                  justify-between
-                "
-              >
+              <div className="flex items-center justify-between">
 
-                <div
-                  className="
-                    flex
-                    items-center
-                    gap-3
-                  "
-                >
+                <div className="flex items-center gap-3">
 
                   <div
                     className="
@@ -1061,32 +1204,19 @@ function PlantDetails() {
 
                   </div>
 
-
                   <div>
 
-                    <p
-                      className="
-                        text-[12px]
-                        font-semibold
-                        text-[#163d27]
-                      "
-                    >
+                    <p className="text-[12px] font-semibold text-[#163d27]">
                       Automatic Pump
                     </p>
 
-                    <p
-                      className="
-                        text-[9px]
-                        text-[#849087]
-                      "
-                    >
+                    <p className="text-[9px] text-[#849087]">
                       Smart watering
                     </p>
 
                   </div>
 
                 </div>
-
 
                 <span
                   className={`
@@ -1102,13 +1232,12 @@ function PlantDetails() {
                     }
                   `}
                 >
-                  {pumpStatus ? "ON" : "OFF"}
+                  {pumpStatus
+                    ? "ON"
+                    : "OFF"}
                 </span>
 
               </div>
-
-
-              {/* YES / NO */}
 
               <div
                 className="
@@ -1120,7 +1249,9 @@ function PlantDetails() {
               >
 
                 <button
-                  onClick={() => handlePump(true)}
+                  onClick={() =>
+                    handlePump(true)
+                  }
                   className={`
                     h-9
                     rounded-lg
@@ -1138,9 +1269,10 @@ function PlantDetails() {
                   YES
                 </button>
 
-
                 <button
-                  onClick={() => handlePump(false)}
+                  onClick={() =>
+                    handlePump(false)
+                  }
                   className={`
                     h-9
                     rounded-lg
@@ -1168,7 +1300,6 @@ function PlantDetails() {
 
       </section>
 
-
       {/* ==================================================
           AI INSIGHT
       ================================================== */}
@@ -1190,13 +1321,7 @@ function PlantDetails() {
           "
         >
 
-          <div
-            className="
-              flex
-              items-start
-              gap-4
-            "
-          >
+          <div className="flex items-start gap-4">
 
             <div
               className="
@@ -1218,7 +1343,6 @@ function PlantDetails() {
 
             </div>
 
-
             <div>
 
               <p
@@ -1233,14 +1357,7 @@ function PlantDetails() {
                 AI Insight
               </p>
 
-              <h2
-                className="
-                  mt-1
-                  text-[17px]
-                  font-bold
-                  text-[#163d27]
-                "
-              >
+              <h2 className="mt-1 text-[17px] font-bold text-[#163d27]">
                 Smart recommendation for your plant
               </h2>
 
@@ -1264,7 +1381,6 @@ function PlantDetails() {
 
       </section>
 
-
       {/* ==================================================
           RECENT CARE
       ================================================== */}
@@ -1284,13 +1400,7 @@ function PlantDetails() {
             "
           >
 
-            <div
-              className="
-                flex
-                items-center
-                gap-3
-              "
-            >
+            <div className="flex items-center gap-3">
 
               <CalendarDays
                 size={20}
@@ -1299,29 +1409,17 @@ function PlantDetails() {
 
               <div>
 
-                <h2
-                  className="
-                    text-[18px]
-                    font-bold
-                    text-[#163d27]
-                  "
-                >
+                <h2 className="text-[18px] font-bold text-[#163d27]">
                   Recent Care Activity
                 </h2>
 
-                <p
-                  className="
-                    text-[10px]
-                    text-[#7b877f]
-                  "
-                >
+                <p className="text-[10px] text-[#7b877f]">
                   Your plant care history
                 </p>
 
               </div>
 
             </div>
-
 
             <div
               className="
@@ -1338,13 +1436,11 @@ function PlantDetails() {
                 text={plant.lastWatered}
               />
 
-
               <CareActivity
                 icon={<Activity size={17} />}
                 title="Health Check"
                 text={`${healthScore}% health score`}
               />
-
 
               <CareActivity
                 icon={<Power size={17} />}
@@ -1364,11 +1460,6 @@ function PlantDetails() {
 
       </section>
 
-
-      {/* ==================================================
-          FOOTER
-      ================================================== */}
-
       <footer
         className="
           border-t
@@ -1378,13 +1469,7 @@ function PlantDetails() {
         "
       >
 
-        <p
-          className="
-            text-center
-            text-[10px]
-            text-[#7b877f]
-          "
-        >
+        <p className="text-center text-[10px] text-[#7b877f]">
           🌱 EcoMinds — Smart Plant Care
         </p>
 
@@ -1393,7 +1478,6 @@ function PlantDetails() {
     </main>
   );
 }
-
 
 // ========================================================
 // CONDITION CARD
@@ -1436,35 +1520,17 @@ function ConditionCard({
         {icon}
       </div>
 
-
       <div className="min-w-0">
 
-        <p
-          className="
-            text-[10px]
-            text-[#7b877f]
-          "
-        >
+        <p className="text-[10px] text-[#7b877f]">
           {title}
         </p>
 
-        <p
-          className="
-            mt-0.5
-            text-[18px]
-            font-bold
-            text-[#163d27]
-          "
-        >
+        <p className="mt-0.5 text-[18px] font-bold text-[#163d27]">
           {value}
         </p>
 
-        <p
-          className="
-            text-[9px]
-            text-[#5d7865]
-          "
-        >
+        <p className="text-[9px] text-[#5d7865]">
           {status}
         </p>
 
@@ -1473,7 +1539,6 @@ function ConditionCard({
     </div>
   );
 }
-
 
 // ========================================================
 // GRAPH BUTTON
@@ -1505,7 +1570,6 @@ function GraphButton({
     </button>
   );
 }
-
 
 // ========================================================
 // CARE ACTIVITY
@@ -1543,26 +1607,13 @@ function CareActivity({
         {icon}
       </div>
 
-
       <div>
 
-        <p
-          className="
-            text-[10px]
-            text-[#829088]
-          "
-        >
+        <p className="text-[10px] text-[#829088]">
           {title}
         </p>
 
-        <p
-          className="
-            mt-0.5
-            text-[12px]
-            font-semibold
-            text-[#365843]
-          "
-        >
+        <p className="mt-0.5 text-[12px] font-semibold text-[#365843]">
           {text}
         </p>
 
@@ -1571,6 +1622,5 @@ function CareActivity({
     </div>
   );
 }
-
 
 export default PlantDetails;

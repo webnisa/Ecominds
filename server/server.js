@@ -7,7 +7,9 @@ import dns from "dns";
 import { clerkMiddleware } from "@clerk/express";
 
 import connectDB from "./config/db.js";
+
 import checkPlantReminders from "./jobs/reminderJob.js";
+
 import {
   startAIHealthJob,
 } from "./jobs/aiHealthJob.js";
@@ -18,6 +20,10 @@ import {
 
 import path from "path";
 import { fileURLToPath } from "url";
+
+// ============================================================
+// ROUTES
+// ============================================================
 
 import userRoutes from "./routes/userRoutes.js";
 import plantRoutes from "./routes/plantRoutes.js";
@@ -35,19 +41,44 @@ import pointsRoutes from "./routes/pointsRoutes.js";
 import monitoringRoutes from "./routes/monitoringRoutes.js";
 import todoRoutes from "./routes/todoRoutes.js";
 
+
+// ============================================================
+// CONFIG
+// ============================================================
+
 dotenv.config();
 
-dns.setServers(["1.1.1.1", "8.8.8.8"]);
+dns.setServers([
+  "1.1.1.1",
+  "8.8.8.8",
+]);
 
 const app = express();
+
+
+// ============================================================
+// PATH
+// ============================================================
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+
+// ============================================================
+// UPLOADS
+// ============================================================
+
 app.use(
   "/uploads",
-  express.static(path.join(__dirname, "uploads"))
+  express.static(
+    path.join(__dirname, "uploads")
+  )
 );
+
+
+// ============================================================
+// CORS
+// ============================================================
 
 app.use(
   cors({
@@ -59,18 +90,26 @@ app.use(
   })
 );
 
+
+// ============================================================
+// MIDDLEWARE
+// ============================================================
+
 app.use(express.json());
 
 app.use(clerkMiddleware());
 
 
+// ============================================================
+// DATABASE
+// ============================================================
 
 connectDB();
 
 
-/* =========================================================
-   ROOT
-========================================================= */
+// ============================================================
+// ROOT
+// ============================================================
 
 app.get("/", (req, res) => {
   res.json({
@@ -79,34 +118,74 @@ app.get("/", (req, res) => {
 });
 
 
-/* =========================================================
-   API ROUTES
-========================================================= */
+// ============================================================
+// API ROUTES
+// ============================================================
 
-app.use("/api/users", userRoutes);
+app.use(
+  "/api/users",
+  userRoutes
+);
 
-app.use("/api/plants", plantRoutes);
+app.use(
+  "/api/plants",
+  plantRoutes
+);
 
-app.use("/api/care", careRoutes);
+app.use(
+  "/api/care",
+  careRoutes
+);
 
-app.use("/api/sensor", sensorRoutes);
+app.use(
+  "/api/sensor",
+  sensorRoutes
+);
 
-app.use("/api/ai", aiRoutes);
+app.use(
+  "/api/ai",
+  aiRoutes
+);
 
-app.use("/api/dashboard", dashboardRoutes);
+app.use(
+  "/api/dashboard",
+  dashboardRoutes
+);
 
-app.use("/api/reminders", reminderRoutes);
+app.use(
+  "/api/reminders",
+  reminderRoutes
+);
 
-app.use("/api/plant-data", plantDataRoutes);
+app.use(
+  "/api/plant-data",
+  plantDataRoutes
+);
 
-app.use("/api/health", healthRoutes);
+app.use(
+  "/api/health",
+  healthRoutes
+);
 
-app.use("/api/pump", pumpRoutes);
+app.use(
+  "/api/pump",
+  pumpRoutes
+);
 
-app.use("/api/devices", deviceRoutes);
+app.use(
+  "/api/devices",
+  deviceRoutes
+);
 
-app.use("/api/points", pointsRoutes);
-app.use("/api/todos", todoRoutes);
+app.use(
+  "/api/points",
+  pointsRoutes
+);
+
+app.use(
+  "/api/todos",
+  todoRoutes
+);
 
 app.use(
   "/api/monitoring",
@@ -119,46 +198,97 @@ app.use(
 );
 
 
-/* =========================================================
-   ERROR HANDLER
-========================================================= */
+// ============================================================
+// ERROR HANDLER
+// ============================================================
 
-app.use((err, req, res, next) => {
-  console.error("SERVER ERROR:", err);
+app.use(
+  (err, req, res, next) => {
+    console.error(
+      "SERVER ERROR:",
+      err
+    );
 
-  if (err.message?.includes("Only JPG")) {
-    return res.status(400).json({
+    if (
+      err.message?.includes(
+        "Only JPG"
+      )
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: err.message,
+      });
+    }
+
+    if (
+      err.code ===
+      "LIMIT_FILE_SIZE"
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Image must be smaller than 5MB",
+      });
+    }
+
+    res.status(500).json({
       success: false,
-      message: err.message,
+      message:
+        "Something went wrong",
     });
   }
+);
 
-  if (err.code === "LIMIT_FILE_SIZE") {
-    return res.status(400).json({
-      success: false,
-      message: "Image must be smaller than 5MB",
-    });
+
+// ============================================================
+// SERVER
+// ============================================================
+
+const PORT =
+  process.env.PORT || 5000;
+
+
+app.listen(
+  PORT,
+  () => {
+
+    console.log(
+      `🌱 EcoMinds server running on port ${PORT}`
+    );
+
+
+    // ========================================================
+    // AI HEALTH JOB
+    // ========================================================
+
+    startAIHealthJob();
+
+
+    // ========================================================
+    // AI HEALTH SCHEDULER
+    // ========================================================
+
+    startAIHealthScheduler();
+
+
+    // ========================================================
+    // REMINDER JOB
+    // ========================================================
+
+    console.log(
+      "🔔 Starting reminder checker..."
+    );
+
+
+    // Run once immediately
+    checkPlantReminders();
+
+
+    // Run every 10 minutes
+    setInterval(
+      checkPlantReminders,
+      10 * 60 * 1000
+    );
+
   }
-
-  res.status(500).json({
-    success: false,
-    message: "Something went wrong",
-  });
-});
-
-
-/* =========================================================
-   SERVER
-========================================================= */
-
-const PORT = process.env.PORT || 5000;
-
-app.listen(PORT, () => {
-  console.log(
-    `EcoMinds server running on port ${PORT}`
-  );
-
-  startAIHealthJob();
-
-startAIHealthScheduler();
-});
+);
