@@ -17,7 +17,7 @@ const navItems = [
   { name: "My Plant", path: "/plants", public: false },
   { name: "AI Suggestion", path: "/ai-suggestion", public: false },
   { name: "Monitoring", path: "/monitoring", public: false },
-  { name: "To-Do List", path: "/reminders", public: false },
+  { name: "To-Do List", path: "/todo", public: false },
 ];
 
 function Navbar() {

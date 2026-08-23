@@ -7,10 +7,43 @@ const client = new OpenAI({
 const MODEL =
   process.env.OPENAI_MODEL || "gpt-5.6-luna";
 
+// ============================================================
+// SAFE JSON PARSER
+// ============================================================
 
-// ==========================================
-// IMAGE → PLANT AI
-// ==========================================
+function parseAIJson(text) {
+  if (!text) {
+    throw new Error("AI returned an empty response.");
+  }
+
+  let cleaned = text.trim();
+
+  // Remove markdown code block
+  cleaned = cleaned
+    .replace(/^```json\s*/i, "")
+    .replace(/^```\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
+
+  try {
+    return JSON.parse(cleaned);
+  } catch (error) {
+    console.error("❌ AI JSON parsing failed");
+    console.error(cleaned);
+
+    throw new Error("AI returned invalid JSON.");
+  }
+}
+
+// ============================================================
+// IMAGE AI
+//
+// NOTE:
+// Your current image AI is handled by
+// plantHealthService.js.
+// This function is kept here only if another part
+// of your application uses it.
+// ============================================================
 
 export const analyzePlantImage = async ({
   imageBase64,
@@ -33,7 +66,7 @@ You are an expert plant-care assistant.
 
 Analyze the uploaded plant image.
 
-Return ONLY valid JSON in this exact structure:
+Return ONLY valid JSON:
 
 {
   "plantName": "",
@@ -51,14 +84,13 @@ Return ONLY valid JSON in this exact structure:
 Rules:
 
 - Identify the plant as accurately as possible.
-- If identification is uncertain, clearly say so.
-- Do not pretend that image alone can measure soil moisture,
-  temperature or humidity.
+- If identification is uncertain, say so.
 - Only describe visible problems.
+- Do not claim to measure soil moisture,
+  temperature or humidity from an image.
 - Give practical beginner-friendly care advice.
 - confidence must be between 0 and 100.
 `,
-
             },
 
             {
@@ -66,89 +98,135 @@ Rules:
 
               image_url:
                 `data:${mimeType};base64,${imageBase64}`,
-
             },
           ],
         },
       ],
     });
 
-    const text =
-      response.output_text;
-
-    return JSON.parse(text);
-
+    return parseAIJson(response.output_text);
   } catch (error) {
-
     console.error(
-      "AI image analysis error:",
+      "❌ AI image analysis error:",
       error
     );
 
-    throw new Error(
-      "Failed to analyze plant image"
-    );
+    throw error;
   }
 };
 
-
-// ==========================================
-// 4–5 DAYS SENSOR DATA → AI PREDICTION
-// ==========================================
+// ============================================================
+// SENSOR HISTORY → AI PLANT HEALTH PREDICTION
+// ============================================================
 
 export const predictPlantHealth = async ({
   plant,
-  sensorData,
+  sensorData = [],
   careHistory = [],
 }) => {
-
   try {
+    if (!plant) {
+      throw new Error("Plant information is required.");
+    }
+
+    if (!Array.isArray(sensorData)) {
+      sensorData = [];
+    }
+
+    if (!Array.isArray(careHistory)) {
+      careHistory = [];
+    }
+
+    // ========================================================
+    // FORMAT SENSOR HISTORY
+    // ========================================================
 
     const formattedSensorData =
       sensorData.map((item) => ({
         date: item.recordedAt,
+
         soilMoisture:
-          item.soilMoisture,
+          item.soilMoisture ?? null,
+
         temperature:
-          item.temperature,
+          item.temperature ?? null,
+
         humidity:
-          item.humidity,
+          item.humidity ?? null,
+
+        // ☀️ IMPORTANT
+        light:
+          item.light ?? null,
       }));
 
+    // ========================================================
+    // FORMAT CARE HISTORY
+    // ========================================================
 
     const formattedCareHistory =
       careHistory.map((item) => ({
-        date: item.performedAt,
-        careType: item.careType,
-        notes: item.notes,
+        date:
+          item.performedAt ||
+          item.createdAt ||
+          null,
+
+        careType:
+          item.careType ||
+          "",
+
+        notes:
+          item.notes ||
+          "",
       }));
 
+    // ========================================================
+    // SENSOR DATA COUNT
+    // ========================================================
 
-    const response =
-      await client.responses.create({
+    const dataPointsUsed =
+      formattedSensorData.length;
 
-        model: MODEL,
+    // ========================================================
+    // PROMPT
+    // ========================================================
 
-        input: `
-
-You are an AI plant-health prediction system
+    const prompt = `
+You are the AI plant-health prediction system
 for a smart irrigation application called EcoMinds.
 
-Analyze the plant and its recent sensor/care history.
+You are analyzing REAL SENSOR HISTORY collected
+from an IoT plant monitoring system.
 
-PLANT:
+The available sensors are:
 
-Name:
-${plant.plantName}
+💧 Soil Moisture
+🌡️ Temperature
+💨 Air Humidity
+☀️ Light / Sunlight
 
-Type:
+Your job is to analyze the recent history and
+predict the plant's current health and possible
+watering/sunlight needs.
+
+==================================================
+PLANT INFORMATION
+==================================================
+
+Plant Name:
+${plant.plantName || "Unknown"}
+
+Plant Type:
 ${plant.plantType || "Unknown"}
 
-Watering frequency:
+Location:
+${plant.location || "Unknown"}
+
+Watering Frequency:
 ${plant.wateringFrequency || "Unknown"} days
 
-
-SENSOR HISTORY:
+==================================================
+SENSOR HISTORY
+==================================================
 
 ${JSON.stringify(
   formattedSensorData,
@@ -156,8 +234,9 @@ ${JSON.stringify(
   2
 )}
 
-
-CARE HISTORY:
+==================================================
+CARE HISTORY
+==================================================
 
 ${JSON.stringify(
   formattedCareHistory,
@@ -165,30 +244,98 @@ ${JSON.stringify(
   2
 )}
 
+==================================================
+IMPORTANT SENSOR ANALYSIS RULES
+==================================================
 
-Return ONLY valid JSON:
+1. Analyze the actual sensor history.
+
+2. Look for decreasing soil moisture.
+
+3. If soil moisture has stayed low for
+   several readings/days, consider possible
+   watering need.
+
+4. If soil moisture remains extremely high,
+   consider possible overwatering.
+
+5. Analyze temperature trends.
+
+6. Analyze humidity trends.
+
+7. Analyze light/sunlight readings.
+
+8. Consistently low light may indicate that
+   the plant is not receiving enough light.
+
+9. Very high light combined with high temperature
+   may indicate possible heat/light stress.
+
+10. Do NOT assume more sunlight is always better.
+
+11. Consider plant type when giving sunlight advice.
+
+12. Combine light and temperature together
+    when evaluating possible heat stress.
+
+13. Do not claim certainty when sensor data
+    is insufficient.
+
+14. If fewer than 3 meaningful sensor readings
+    are available, clearly mention that the
+    prediction has limited confidence.
+
+15. Do not invent sensor values.
+
+16. Do not invent diseases.
+
+17. Use watering history if available.
+
+18. Explain WHY the plant is predicted to be
+    healthy, stressed or critical.
+
+==================================================
+RETURN ONLY VALID JSON
+==================================================
+
+Return exactly this structure:
 
 {
   "healthScore": 0,
+
   "status": "healthy",
+
   "riskLevel": "low",
+
   "trend": "stable",
+
   "analysis": "",
+
   "recommendation": "",
+
   "factors": [
     {
       "factor": "",
       "impact": "positive"
     }
   ],
+
   "prediction": "",
+
   "wateringNeeded": false,
+
   "suggestedWateringReason": "",
+
+  "sunlightStatus": "",
+
+  "sunlightRecommendation": "",
+
   "dataPointsUsed": 0
 }
 
-
-Allowed values:
+==================================================
+ALLOWED VALUES
+==================================================
 
 status:
 - healthy
@@ -205,38 +352,188 @@ trend:
 - stable
 - declining
 
-Rules:
+factor impact:
+- positive
+- negative
+- neutral
 
-1. healthScore must be 0–100.
-2. Use the actual sensor history.
-3. Look for declining soil moisture.
-4. Look for prolonged high temperature.
-5. Look for unusually low humidity.
-6. Detect possible overwatering if moisture remains very high.
-7. Consider care history.
-8. Do not claim certainty.
-9. Explain why the prediction was made.
-10. If there is insufficient data, clearly mention it.
-`,
+==================================================
+HEALTH SCORE
+==================================================
 
+90-100:
+Excellent conditions.
+
+75-89:
+Generally healthy.
+
+50-74:
+Needs some attention.
+
+25-49:
+Stressed.
+
+0-24:
+Critical condition.
+
+==================================================
+IMPORTANT
+==================================================
+
+The AI prediction should be based on:
+
+💧 moisture
+🌡️ temperature
+💨 humidity
+☀️ sunlight/light
+🌱 plant type
+💦 watering history
+📅 recent sensor trend
+
+Do not say that the plant definitely has a disease.
+
+Return ONLY JSON.
+`;
+
+    console.log(
+      "🤖 Sending sensor history to AI..."
+    );
+
+    // ========================================================
+    // OPENAI
+    // ========================================================
+
+    const response =
+      await client.responses.create({
+        model: MODEL,
+
+        input: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "input_text",
+                text: prompt,
+              },
+            ],
+          },
+        ],
       });
 
+    // ========================================================
+    // RESPONSE
+    // ========================================================
 
-    const text =
-      response.output_text;
+    const result =
+      parseAIJson(
+        response.output_text
+      );
 
+    // ========================================================
+    // NORMALIZE
+    // ========================================================
 
-    return JSON.parse(text);
+    const healthScore = Math.max(
+      0,
+      Math.min(
+        100,
+        Number(result.healthScore) || 0
+      )
+    );
+
+    const allowedStatus = [
+      "healthy",
+      "warning",
+      "critical",
+    ];
+
+    const allowedRisk = [
+      "low",
+      "medium",
+      "high",
+    ];
+
+    const allowedTrend = [
+      "improving",
+      "stable",
+      "declining",
+    ];
+
+    const finalResult = {
+      healthScore,
+
+      status:
+        allowedStatus.includes(
+          result.status
+        )
+          ? result.status
+          : "warning",
+
+      riskLevel:
+        allowedRisk.includes(
+          result.riskLevel
+        )
+          ? result.riskLevel
+          : "medium",
+
+      trend:
+        allowedTrend.includes(
+          result.trend
+        )
+          ? result.trend
+          : "stable",
+
+      analysis:
+        result.analysis ||
+        "Not enough information for detailed analysis.",
+
+      recommendation:
+        result.recommendation ||
+        "Continue monitoring the plant.",
+
+      factors:
+        Array.isArray(result.factors)
+          ? result.factors
+          : [],
+
+      prediction:
+        result.prediction ||
+        "",
+
+      wateringNeeded:
+        Boolean(
+          result.wateringNeeded
+        ),
+
+      suggestedWateringReason:
+        result.suggestedWateringReason ||
+        "",
+
+      sunlightStatus:
+        result.sunlightStatus ||
+        "Unknown",
+
+      sunlightRecommendation:
+        result.sunlightRecommendation ||
+        "Continue monitoring light conditions.",
+
+      dataPointsUsed:
+        dataPointsUsed,
+    };
+
+    console.log(
+      "🌱 SENSOR AI RESULT:",
+      finalResult
+    );
+
+    return finalResult;
 
   } catch (error) {
-
     console.error(
-      "AI health prediction error:",
+      "❌ AI health prediction error:",
       error
     );
 
-    throw new Error(
-      "Failed to predict plant health"
-    );
+    throw error;
   }
 };

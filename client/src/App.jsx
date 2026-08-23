@@ -11,6 +11,7 @@ import Reminder from "./pages/Reminders";
 import Profile from "./pages/Profile";
 import AddPlant from "./pages/AddPlant";
 import AISuggestion from "./pages/AISuggestion";
+import TodoList from "./pages/TodoList";
 
 function App() {
   return (
@@ -18,13 +19,9 @@ function App() {
       <Navbar />
 
       <Routes>
-
         {/* ================= PUBLIC ================= */}
 
-        <Route
-          path="/"
-          element={<Dashboard />}
-        />
+        <Route path="/" element={<Dashboard />} />
 
         {/* ================= PLANTS ================= */}
 
@@ -61,10 +58,7 @@ function App() {
 
         {/* ================= AI ================= */}
 
-       <Route
-  path="/ai-suggestion"
-  element={<AISuggestion />}
-/>
+        <Route path="/ai-suggestion" element={<AISuggestion />} />
 
         {/* ================= MONITORING ================= */}
 
@@ -88,6 +82,8 @@ function App() {
           }
         />
 
+        <Route path="/todo" element={<TodoList />} />
+
         {/* ================= PROFILE ================= */}
 
         <Route
@@ -98,7 +94,6 @@ function App() {
             </ProtectedRoute>
           }
         />
-
       </Routes>
     </BrowserRouter>
   );

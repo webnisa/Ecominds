@@ -8,7 +8,13 @@ import { clerkMiddleware } from "@clerk/express";
 
 import connectDB from "./config/db.js";
 import checkPlantReminders from "./jobs/reminderJob.js";
-import { startAIHealthScheduler } from "./jobs/aiHealthScheduler.js";
+import {
+  startAIHealthJob,
+} from "./jobs/aiHealthJob.js";
+
+import {
+  startAIHealthScheduler,
+} from "./jobs/aiHealthScheduler.js";
 
 import path from "path";
 import { fileURLToPath } from "url";
@@ -25,8 +31,8 @@ import healthRoutes from "./routes/healthRoutes.js";
 import pumpRoutes from "./routes/pumpRoutes.js";
 import deviceRoutes from "./routes/deviceRoutes.js";
 import pumpPreferenceRoutes from "./routes/pumpPreferenceRoutes.js";
-import { startAIHealthJob } from "./jobs/aiHealthJob.js";
 import pointsRoutes from "./routes/pointsRoutes.js";
+import todoRoutes from "./routes/todoRoutes.js";
 
 dotenv.config();
 
@@ -99,6 +105,7 @@ app.use("/api/pump", pumpRoutes);
 app.use("/api/devices", deviceRoutes);
 
 app.use("/api/points", pointsRoutes);
+app.use("/api/todos", todoRoutes);
 
 app.use(
   "/api/pump-preference",
@@ -145,5 +152,7 @@ app.listen(PORT, () => {
     `EcoMinds server running on port ${PORT}`
   );
 
-   startAIHealthScheduler();
+  startAIHealthJob();
+
+startAIHealthScheduler();
 });

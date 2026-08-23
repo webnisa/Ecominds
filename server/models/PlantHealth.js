@@ -2,11 +2,19 @@ import mongoose from "mongoose";
 
 const plantHealthSchema = new mongoose.Schema(
   {
+    // ==========================================
+    // USER
+    // ==========================================
+
     userId: {
       type: String,
       required: true,
       index: true,
     },
+
+    // ==========================================
+    // PLANT
+    // ==========================================
 
     plantId: {
       type: mongoose.Schema.Types.ObjectId,
@@ -15,12 +23,20 @@ const plantHealthSchema = new mongoose.Schema(
       index: true,
     },
 
+    // ==========================================
+    // HEALTH SCORE
+    // ==========================================
+
     healthScore: {
       type: Number,
       min: 0,
       max: 100,
       default: 0,
     },
+
+    // ==========================================
+    // STATUS
+    // ==========================================
 
     status: {
       type: String,
@@ -33,6 +49,10 @@ const plantHealthSchema = new mongoose.Schema(
       default: "unknown",
     },
 
+    // ==========================================
+    // RISK
+    // ==========================================
+
     riskLevel: {
       type: String,
       enum: [
@@ -44,6 +64,10 @@ const plantHealthSchema = new mongoose.Schema(
       default: "unknown",
     },
 
+    // ==========================================
+    // AI ANALYSIS
+    // ==========================================
+
     analysis: {
       type: String,
       default: "",
@@ -53,6 +77,10 @@ const plantHealthSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+
+    // ==========================================
+    // SENSOR FACTORS
+    // ==========================================
 
     factors: {
       moisture: {
@@ -70,16 +98,29 @@ const plantHealthSchema = new mongoose.Schema(
         default: "",
       },
 
+      sunlight: {
+        type: String,
+        default: "",
+      },
+
       watering: {
         type: String,
         default: "",
       },
     },
 
+    // ==========================================
+    // DATA POINTS
+    // ==========================================
+
     dataPointsUsed: {
       type: Number,
       default: 0,
     },
+
+    // ==========================================
+    // GENERATED
+    // ==========================================
 
     generatedAt: {
       type: Date,
@@ -91,9 +132,12 @@ const plantHealthSchema = new mongoose.Schema(
   }
 );
 
-const PlantHealth = mongoose.model(
-  "PlantHealth",
-  plantHealthSchema
-);
+// ==========================================
+// PREVENT MONGOOSE OVERWRITE ERROR
+// ==========================================
+
+const PlantHealth =
+  mongoose.models.PlantHealth ||
+  mongoose.model("PlantHealth", plantHealthSchema);
 
 export default PlantHealth;

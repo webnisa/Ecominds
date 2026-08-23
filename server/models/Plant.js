@@ -2,11 +2,19 @@ import mongoose from "mongoose";
 
 const plantSchema = new mongoose.Schema(
   {
+    // ==========================================
+    // USER
+    // ==========================================
+
     userId: {
       type: String,
       required: true,
       index: true,
     },
+
+    // ==========================================
+    // BASIC PLANT INFO
+    // ==========================================
 
     plantName: {
       type: String,
@@ -29,6 +37,10 @@ const plantSchema = new mongoose.Schema(
       default: "",
     },
 
+    // ==========================================
+    // WATERING
+    // ==========================================
+
     wateringFrequency: {
       type: Number,
       default: 7,
@@ -43,36 +55,52 @@ const plantSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+
+    // ==========================================
+    // AI HEALTH
+    // ==========================================
+
     healthScore: {
-  type: Number,
-  default: 0,
-},
+      type: Number,
+      default: 0,
+    },
 
-health: {
-  type: String,
-  default: "Unknown",
-},
+    health: {
+      type: String,
+      default: "Unknown",
+    },
 
-lastHealthCheck: {
-  type: Date,
-  default: null,
-},
+    lastHealthCheck: {
+      type: Date,
+      default: null,
+    },
 
-healthProblems: {
-  type: [String],
-  default: [],
-},
+    healthProblems: {
+      type: [String],
+      default: [],
+    },
 
-healthTips: {
-  type: [String],
-  default: [],
-},
+    healthTips: {
+      type: [String],
+      default: [],
+    },
+
+    aiInsight: {
+      type: String,
+      default: "",
+    },
   },
   {
     timestamps: true,
   }
 );
 
-const Plant = mongoose.model("Plant", plantSchema);
+// ==========================================
+// PREVENT MONGOOSE OVERWRITE ERROR
+// ==========================================
+
+const Plant =
+  mongoose.models.Plant ||
+  mongoose.model("Plant", plantSchema);
 
 export default Plant;
