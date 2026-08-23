@@ -6,6 +6,25 @@ yarn-debug.log*
 yarn-error.log*
 lerna-debug.log*
 
+# Environment variables
+.env
+.env.*
+client/.env
+server/.env
+
+# Dependencies
+node_modules/
+client/node_modules/
+server/node_modules/
+
+# Build
+dist/
+client/dist/
+server/dist/
+
+# Uploads
+server/uploads/
+
 # Diagnostic reports (https://nodejs.org/api/report.html)
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
