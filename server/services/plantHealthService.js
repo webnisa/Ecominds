@@ -1,279 +1,173 @@
-import OpenAI from "openai";
+// ============================================================
+// GEMINI IMAGE ANALYSIS
+// ============================================================
+
 import fs from "fs";
 import path from "path";
+import { GoogleGenAI } from "@google/genai";
 
 // ============================================================
-// OPENAI CLIENT
+// GEMINI CONFIGURATION
 // ============================================================
 
-if (!process.env.OPENAI_API_KEY) {
+if (!process.env.GEMINI_API_KEY) {
   console.warn(
-    "⚠️ OPENAI_API_KEY is missing. Image AI will not work."
+    "⚠️ GEMINI_API_KEY is missing. Gemini AI will not work."
   );
 }
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
+const gemini = new GoogleGenAI({
+  apiKey: process.env.GEMINI_API_KEY,
 });
 
+// IMPORTANT:
+// Put the model name in your .env file.
+// Example:
+// GEMINI_MODEL=gemini-3.7-flash
+
+const GEMINI_MODEL =
+  process.env.GEMINI_MODEL || "gemini-3.7-flash";
+
 
 // ============================================================
-// JSON HELPER
+// GEMINI IMAGE ANALYSIS
 // ============================================================
 
-function extractJSON(text) {
-  if (!text) {
-    throw new Error("AI returned an empty response.");
-  }
-
-  let cleaned = text.trim();
-
-  cleaned = cleaned
-    .replace(/^```json\s*/i, "")
-    .replace(/^```\s*/i, "")
-    .replace(/\s*```$/i, "")
-    .trim();
-
+export async function analyzePlantImage(file) {
   try {
-    return JSON.parse(cleaned);
-  } catch (error) {
-    console.error("❌ AI JSON parse failed:");
-    console.error(cleaned);
-
-    throw new Error("AI returned invalid JSON.");
-  }
-}
-
-
-// ============================================================
-// IMAGE NORMALIZER
-// Accepts:
-// 1. Multer req.file
-// 2. data:image/... base64
-// 3. normal base64
-// ============================================================
-
-function normalizeImage(image) {
-
-  if (!image) {
-    throw new Error("Plant image is required.");
-  }
-
-
-  // ========================================================
-  // MULTER FILE OBJECT
-  // ========================================================
-
-  if (
-    typeof image === "object" &&
-    image.path
-  ) {
-
-    console.log("📦 Processing Multer image:");
-
-    console.log({
-      path: image.path,
-      mimetype: image.mimetype,
-      originalname: image.originalname,
-      size: image.size,
-    });
-
-
-    const imagePath = path.resolve(
-      image.path
+    console.log(
+      "🌱 Starting Gemini plant image analysis..."
     );
 
+    // ========================================================
+    // CHECK API KEY
+    // ========================================================
+
+    if (!process.env.GEMINI_API_KEY) {
+      throw new Error(
+        "GEMINI_API_KEY is missing in server environment."
+      );
+    }
+
+    // ========================================================
+    // CHECK FILE
+    // ========================================================
+
+    if (!file) {
+      throw new Error(
+        "Plant image is required."
+      );
+    }
+
+    if (!file.path) {
+      throw new Error(
+        "Uploaded image path not found."
+      );
+    }
+
+    console.log(
+      "📦 Processing Multer image:"
+    );
+
+    console.log({
+      path: file.path,
+      mimetype: file.mimetype,
+      originalname: file.originalname,
+      size: file.size,
+    });
+
+    // ========================================================
+    // CHECK IMAGE EXISTS
+    // ========================================================
+
+    const imagePath = path.resolve(
+      file.path
+    );
 
     if (!fs.existsSync(imagePath)) {
-
-      console.error(
-        "❌ Image file does not exist:",
-        imagePath
-      );
-
       throw new Error(
-        `Uploaded image file not found: ${imagePath}`
+        `Uploaded image does not exist: ${imagePath}`
       );
     }
 
-
-    const buffer =
-      fs.readFileSync(imagePath);
-
-
-    if (!buffer || buffer.length === 0) {
-
-      throw new Error(
-        "Uploaded image file is empty."
-      );
-    }
-
-
-    // ------------------------------------------------------
+    // ========================================================
     // MIME TYPE
-    // ------------------------------------------------------
+    // ========================================================
 
     let mimeType =
-      image.mimetype;
+      file.mimetype || "image/jpeg";
 
-
-    // Sometimes multer may not provide correct type
-    if (
-      !mimeType ||
-      !mimeType.startsWith("image/")
-    ) {
-
+    // Safety fallback
+    if (!mimeType.startsWith("image/")) {
       const extension =
-        path.extname(
-          image.originalname || ""
-        ).toLowerCase();
-
+        path
+          .extname(file.originalname || "")
+          .toLowerCase();
 
       const mimeMap = {
-
-        ".jpg":
-          "image/jpeg",
-
-        ".jpeg":
-          "image/jpeg",
-
-        ".png":
-          "image/png",
-
-        ".webp":
-          "image/webp",
-
-        ".gif":
-          "image/gif",
-
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".webp": "image/webp",
+        ".gif": "image/gif",
       };
-
 
       mimeType =
         mimeMap[extension] ||
         "image/jpeg";
     }
 
-
     console.log(
       "🖼️ Image MIME:",
       mimeType
     );
 
+    // ========================================================
+    // READ IMAGE
+    // ========================================================
 
-    // ------------------------------------------------------
-    // BASE64
-    // ------------------------------------------------------
+    const imageBuffer =
+      fs.readFileSync(imagePath);
 
-    const base64 =
-      buffer.toString("base64");
-
-
-    return {
-      dataUrl:
-        `data:${mimeType};base64,${base64}`,
-
-      filePath:
-        imagePath,
-    };
-  }
-
-
-  // ========================================================
-  // STRING IMAGE
-  // ========================================================
-
-  if (typeof image === "string") {
-
-    // Already data URL
     if (
-      image.startsWith(
-        "data:image/"
-      )
+      !imageBuffer ||
+      imageBuffer.length === 0
     ) {
-
-      return {
-        dataUrl: image,
-        filePath: null,
-      };
-    }
-
-
-    // Plain base64
-    return {
-      dataUrl:
-        `data:image/jpeg;base64,${image}`,
-
-      filePath: null,
-    };
-  }
-
-
-  throw new Error(
-    "Invalid image format."
-  );
-}
-
-
-// ============================================================
-// REAL IMAGE AI ANALYSIS
-// ============================================================
-
-export async function analyzePlantImage(image) {
-
-  try {
-
-    console.log(
-      "🌱 Starting REAL plant image analysis..."
-    );
-
-
-    // ========================================================
-    // API KEY
-    // ========================================================
-
-    if (!process.env.OPENAI_API_KEY) {
-
       throw new Error(
-        "OPENAI_API_KEY is missing in server environment."
+        "Uploaded image file is empty."
       );
     }
 
-
     // ========================================================
-    // NORMALIZE IMAGE
+    // BASE64
     // ========================================================
 
-    const normalized =
-      normalizeImage(image);
-
-
-    const imageData =
-      normalized.dataUrl;
-
+    const imageBase64 =
+      imageBuffer.toString("base64");
 
     console.log(
       "✅ Image converted successfully"
     );
-
 
     // ========================================================
     // PROMPT
     // ========================================================
 
     const prompt = `
+You are an expert plant health assistant for EcoMinds,
+a smart plant monitoring and irrigation application.
 
-You are an expert plant health assistant.
+Carefully inspect the uploaded plant photograph.
 
-Analyze the uploaded plant photograph carefully.
+==================================================
+IMPORTANT IMAGE ANALYSIS RULES
+==================================================
 
-IMPORTANT:
+1. Actually inspect the visible plant.
 
-Actually inspect the visible plant.
+2. Do NOT automatically call the plant healthy.
 
-Do NOT automatically call every plant healthy.
-
-Look for visible signs such as:
+3. Look carefully for visible signs such as:
 
 - yellow leaves
 - brown leaves
@@ -287,16 +181,42 @@ Look for visible signs such as:
 - fungal-looking symptoms
 - weak growth
 - dehydration
-- dead-looking portions
+- dead portions
 - overwatering signs
+- leaf curling
+- damaged stems
+- unhealthy roots if visible
 
-If the image does not provide enough evidence,
-say so.
+4. Do not invent diseases.
 
-Never invent a disease that cannot reasonably
-be seen from the photograph.
+5. Only report problems that are reasonably
+   visible in the photograph.
 
-Plant health categories:
+6. If the image is unclear, reduce confidence.
+
+7. Plant identification may be uncertain.
+
+8. Do NOT claim that the image can directly
+   measure:
+
+- soil moisture
+- temperature
+- humidity
+- sunlight intensity
+
+Those values come from EcoMinds sensors.
+
+9. Give beginner-friendly and practical advice.
+
+10. If the plant appears severely damaged,
+    extremely dry, collapsed, or dead-looking,
+    do NOT give it a high health score.
+
+==================================================
+HEALTH STATUS
+==================================================
+
+Allowed values:
 
 Healthy
 Good
@@ -306,30 +226,9 @@ Critical
 Possibly Dead
 Uncertain
 
-Health score must reflect visible condition.
-
-A severely dry or dead-looking plant MUST NOT
-receive a high score.
-
-Return ONLY valid JSON.
-
-Use EXACTLY this structure:
-
-{
-  "plantName": "string",
-  "plantType": "string",
-  "confidence": 0,
-  "healthStatus": "Healthy",
-  "healthScore": 0,
-  "visibleProblems": [],
-  "wateringAdvice": "string",
-  "sunlightAdvice": "string",
-  "soilAdvice": "string",
-  "careTips": [],
-  "overallRecommendation": "string"
-}
-
-HEALTH SCORE:
+==================================================
+HEALTH SCORE
+==================================================
 
 90-100:
 Very healthy with no meaningful visible problems.
@@ -349,80 +248,157 @@ Severely damaged.
 0-9:
 Very likely dead or almost completely dead.
 
-If the plant appears dead, extremely dry,
-collapsed or severely damaged,
-DO NOT return Healthy.
+==================================================
+JSON RESPONSE
+==================================================
+
+Return ONLY valid JSON.
+
+Do NOT use markdown.
+
+Do NOT use code blocks.
+
+Use EXACTLY this structure:
+
+{
+  "plantName": "string",
+  "plantType": "string",
+  "confidence": 0,
+  "healthStatus": "Healthy",
+  "healthScore": 0,
+  "visibleProblems": [],
+  "wateringAdvice": "string",
+  "sunlightAdvice": "string",
+  "soilAdvice": "string",
+  "careTips": [],
+  "overallRecommendation": "string"
+}
+
+==================================================
+FINAL RULE
+==================================================
 
 Analyze ONLY what can reasonably be inferred
-from the image.
+from the photograph.
 
+Never invent sensor readings.
+
+Never invent diseases.
+
+Never claim certainty when the image does not
+provide enough evidence.
 `;
 
-
     // ========================================================
-    // OPENAI REQUEST
+    // SEND IMAGE TO GEMINI
     // ========================================================
 
     console.log(
-      "🤖 Sending image to OpenAI..."
+      "🤖 Sending image to Gemini..."
     );
 
+    console.log(
+      "🤖 Gemini model:",
+      GEMINI_MODEL
+    );
 
     const response =
-      await openai.responses.create({
+      await gemini.models.generateContent({
+        model: GEMINI_MODEL,
 
-        model:
-          process.env.OPENAI_VISION_MODEL ||
-          "gpt-5.6-luna",
-
-        input: [
-
+        contents: [
           {
             role: "user",
 
-            content: [
-
+            parts: [
               {
-                type: "input_text",
-
                 text: prompt,
               },
 
               {
-                type: "input_image",
-
-                image_url: imageData,
+                inlineData: {
+                  mimeType: mimeType,
+                  data: imageBase64,
+                },
               },
-
             ],
           },
-
         ],
-
       });
 
-
     // ========================================================
-    // RAW RESPONSE
+    // GET RESPONSE TEXT
     // ========================================================
 
     const rawText =
-      response.output_text;
-
+      response.text || "";
 
     console.log(
-      "🤖 Raw AI image response:",
-      rawText
+      "🤖 Gemini RAW RESPONSE:"
     );
 
+    console.log(rawText);
+
+    if (!rawText.trim()) {
+      throw new Error(
+        "Gemini returned an empty response."
+      );
+    }
 
     // ========================================================
-    // PARSE
+    // CLEAN JSON
     // ========================================================
 
-    const result =
-      extractJSON(rawText);
+    let cleaned =
+      rawText.trim();
 
+    // Remove ```json
+    cleaned =
+      cleaned.replace(
+        /^```json\s*/i,
+        ""
+      );
+
+    // Remove ```
+    cleaned =
+      cleaned.replace(
+        /^```\s*/i,
+        ""
+      );
+
+    cleaned =
+      cleaned.replace(
+        /\s*```$/i,
+        ""
+      );
+
+    cleaned =
+      cleaned.trim();
+
+    // ========================================================
+    // PARSE JSON
+    // ========================================================
+
+    let result;
+
+    try {
+      result =
+        JSON.parse(cleaned);
+
+    } catch (error) {
+
+      console.error(
+        "❌ Gemini returned invalid JSON:"
+      );
+
+      console.error(
+        cleaned
+      );
+
+      throw new Error(
+        "Gemini returned invalid JSON."
+      );
+    }
 
     // ========================================================
     // HEALTH SCORE
@@ -439,6 +415,41 @@ from the image.
         )
       );
 
+    // ========================================================
+    // CONFIDENCE
+    // ========================================================
+
+    const confidence =
+      Math.max(
+        0,
+        Math.min(
+          100,
+          Number(
+            result.confidence
+          ) || 0
+        )
+      );
+
+    // ========================================================
+    // ALLOWED HEALTH STATUS
+    // ========================================================
+
+    const allowedHealthStatuses = [
+      "Healthy",
+      "Good",
+      "Needs Attention",
+      "Poor",
+      "Critical",
+      "Possibly Dead",
+      "Uncertain",
+    ];
+
+    const healthStatus =
+      allowedHealthStatuses.includes(
+        result.healthStatus
+      )
+        ? result.healthStatus
+        : "Uncertain";
 
     // ========================================================
     // FINAL RESULT
@@ -454,20 +465,9 @@ from the image.
         result.plantType ||
         "Unknown",
 
-      confidence:
-        Math.max(
-          0,
-          Math.min(
-            100,
-            Number(
-              result.confidence
-            ) || 0
-          )
-        ),
+      confidence,
 
-      healthStatus:
-        result.healthStatus ||
-        "Uncertain",
+      healthStatus,
 
       healthScore,
 
@@ -484,11 +484,11 @@ from the image.
 
       sunlightAdvice:
         result.sunlightAdvice ||
-        "Provide appropriate light for the plant.",
+        "Provide suitable sunlight according to the plant type.",
 
       soilAdvice:
         result.soilAdvice ||
-        "Keep soil well-drained.",
+        "Use suitable, well-drained soil.",
 
       careTips:
         Array.isArray(
@@ -500,427 +500,60 @@ from the image.
       overallRecommendation:
         result.overallRecommendation ||
         "Continue monitoring the plant regularly.",
-
     };
 
+    // ========================================================
+    // LOG FINAL RESULT
+    // ========================================================
 
     console.log(
-      "🤖 AI RESULT:",
+      "🌱 GEMINI FINAL RESULT:"
+    );
+
+    console.log(
       finalResult
     );
 
-
     // ========================================================
-    // DELETE TEMP IMAGE
+    // DELETE TEMPORARY IMAGE
     // ========================================================
 
-    if (normalized.filePath) {
+    try {
 
-      try {
+      if (
+        fs.existsSync(imagePath)
+      ) {
 
         fs.unlinkSync(
-          normalized.filePath
+          imagePath
         );
 
         console.log(
           "🗑️ Temporary image deleted"
         );
-
-      } catch (deleteError) {
-
-        console.warn(
-          "⚠️ Could not delete temporary image:",
-          deleteError.message
-        );
-
       }
+
+    } catch (deleteError) {
+
+      console.warn(
+        "⚠️ Could not delete temporary image:",
+        deleteError.message
+      );
     }
 
+    // ========================================================
+    // RETURN
+    // ========================================================
 
     return finalResult;
-
 
   } catch (error) {
 
     console.error(
-      "❌ REAL IMAGE AI ERROR:",
+      "❌ GEMINI IMAGE AI ERROR:",
       error
     );
 
     throw error;
   }
-}
-
-
-// ============================================================
-// DAILY SENSOR HEALTH ANALYSIS
-// ============================================================
-
-export async function analyzePlantHealth(
-  plant
-) {
-
-  if (!plant) {
-    throw new Error(
-      "Plant data is required."
-    );
-  }
-
-
-  const moisture =
-    Number(
-      plant.moisture ?? 0
-    );
-
-  const temperature =
-    Number(
-      plant.temperature ?? 0
-    );
-
-  const humidity =
-    Number(
-      plant.humidity ?? 0
-    );
-
-
-  let score = 100;
-
-  const problems = [];
-
-  const tips = [];
-
-
-  // ========================================================
-  // MOISTURE
-  // ========================================================
-
-  if (moisture < 15) {
-
-    score -= 40;
-
-    problems.push(
-      "Soil moisture is extremely low."
-    );
-
-    tips.push(
-      "The plant may be severely dehydrated. Check the soil and water appropriately."
-    );
-
-  } else if (moisture < 25) {
-
-    score -= 30;
-
-    problems.push(
-      "Soil is very dry."
-    );
-
-    tips.push(
-      "The plant may need watering soon."
-    );
-
-  } else if (moisture < 35) {
-
-    score -= 15;
-
-    problems.push(
-      "Soil moisture is low."
-    );
-
-    tips.push(
-      "Monitor soil moisture and water if required."
-    );
-
-  } else if (moisture > 90) {
-
-    score -= 35;
-
-    problems.push(
-      "Soil is excessively wet."
-    );
-
-    tips.push(
-      "Avoid additional watering and check drainage."
-    );
-
-  } else if (moisture > 80) {
-
-    score -= 20;
-
-    problems.push(
-      "Soil moisture is very high."
-    );
-
-    tips.push(
-      "Avoid overwatering."
-    );
-
-  } else if (moisture > 70) {
-
-    score -= 10;
-
-    problems.push(
-      "Soil moisture is relatively high."
-    );
-
-    tips.push(
-      "Allow the soil to dry appropriately before watering again."
-    );
-  }
-
-
-  // ========================================================
-  // TEMPERATURE
-  // ========================================================
-
-  if (temperature < 5) {
-
-    score -= 35;
-
-    problems.push(
-      "Temperature is extremely low."
-    );
-
-    tips.push(
-      "Protect the plant from extreme cold."
-    );
-
-  } else if (temperature < 10) {
-
-    score -= 20;
-
-    problems.push(
-      "Temperature is low."
-    );
-
-  } else if (temperature > 40) {
-
-    score -= 35;
-
-    problems.push(
-      "Temperature is extremely high."
-    );
-
-    tips.push(
-      "Protect the plant from extreme heat."
-    );
-
-  } else if (temperature > 35) {
-
-    score -= 20;
-
-    problems.push(
-      "Temperature is high."
-    );
-
-    tips.push(
-      "Provide shade and monitor heat stress."
-    );
-
-  } else if (temperature > 32) {
-
-    score -= 10;
-
-    problems.push(
-      "Temperature is somewhat high."
-    );
-  }
-
-
-  // ========================================================
-  // HUMIDITY
-  // ========================================================
-
-  if (humidity < 20) {
-
-    score -= 25;
-
-    problems.push(
-      "Air humidity is very low."
-    );
-
-    tips.push(
-      "Monitor the plant for signs of dryness."
-    );
-
-  } else if (humidity < 30) {
-
-    score -= 15;
-
-    problems.push(
-      "Air humidity is low."
-    );
-
-  } else if (humidity > 90) {
-
-    score -= 20;
-
-    problems.push(
-      "Air humidity is extremely high."
-    );
-
-    tips.push(
-      "Improve ventilation and air circulation."
-    );
-
-  } else if (humidity > 80) {
-
-    score -= 10;
-
-    problems.push(
-      "Air humidity is high."
-    );
-
-    tips.push(
-      "Maintain good air circulation."
-    );
-  }
-
-
-  // ========================================================
-  // FINAL SCORE
-  // ========================================================
-
-  score =
-    Math.max(
-      0,
-      Math.min(
-        100,
-        Math.round(score)
-      )
-    );
-
-
-  // ========================================================
-  // STATUS
-  // ========================================================
-
-  let healthStatus;
-
-  if (score >= 85) {
-
-    healthStatus = "Healthy";
-
-  } else if (score >= 70) {
-
-    healthStatus = "Good";
-
-  } else if (score >= 45) {
-
-    healthStatus = "Needs Attention";
-
-  } else if (score >= 25) {
-
-    healthStatus = "Poor";
-
-  } else {
-
-    healthStatus = "Critical";
-  }
-
-
-  if (problems.length === 0) {
-
-    tips.push(
-      "Current sensor conditions look suitable. Continue regular monitoring."
-    );
-  }
-
-
-  return {
-
-    healthScore: score,
-
-    healthStatus,
-
-    visibleProblems:
-      problems,
-
-    careTips:
-      tips,
-
-    checkedAt:
-      new Date(),
-
-  };
-}
-
-
-// ============================================================
-// RECOMMENDATION
-// ============================================================
-
-export function getPlantHealthRecommendation(
-  healthResult
-) {
-
-  if (!healthResult) {
-
-    return "Unable to determine plant health.";
-  }
-
-
-  const {
-    healthScore,
-    visibleProblems = [],
-  } = healthResult;
-
-
-  if (healthScore >= 85) {
-
-    return (
-      "Your plant is currently doing well. " +
-      "Continue regular monitoring."
-    );
-  }
-
-
-  if (healthScore >= 70) {
-
-    return (
-      "Your plant is generally healthy, " +
-      "but keep monitoring its conditions."
-    );
-  }
-
-
-  if (healthScore >= 45) {
-
-    return (
-      "Your plant needs some attention. " +
-      visibleProblems.join(" ")
-    );
-  }
-
-
-  if (healthScore >= 25) {
-
-    return (
-      "Your plant appears stressed. " +
-      "Check watering, temperature and humidity."
-    );
-  }
-
-
-  return (
-    "Your plant is in critical condition. " +
-    "Immediate inspection is recommended."
-  );
-}
-
-
-// ============================================================
-// BACKWARD COMPATIBILITY
-// ============================================================
-
-export async function predictPlantHealth(
-  plant
-) {
-
-  console.log(
-    "🌱 Predicting plant health..."
-  );
-
-  return analyzePlantHealth(
-    plant
-  );
 }

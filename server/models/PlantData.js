@@ -2,19 +2,11 @@ import mongoose from "mongoose";
 
 const plantDataSchema = new mongoose.Schema(
   {
-    // ==========================================
-    // USER
-    // ==========================================
-
     userId: {
       type: String,
       required: true,
       index: true,
     },
-
-    // ==========================================
-    // PLANT
-    // ==========================================
 
     plantId: {
       type: mongoose.Schema.Types.ObjectId,
@@ -23,52 +15,26 @@ const plantDataSchema = new mongoose.Schema(
       index: true,
     },
 
-    // ==========================================
-    // SOIL MOISTURE
-    // ==========================================
-
     soilMoisture: {
       type: Number,
       default: null,
     },
-
-    // ==========================================
-    // TEMPERATURE
-    // ==========================================
 
     temperature: {
       type: Number,
       default: null,
     },
 
-    // ==========================================
-    // HUMIDITY
-    // ==========================================
-
     humidity: {
       type: Number,
       default: null,
     },
 
-    // ==========================================
-    // LIGHT / SUNLIGHT
-    // ==========================================
-
+    // ☀️ Sunlight / LDR sensor value
     light: {
       type: Number,
       default: null,
     },
-
-    // Optional alias if your frontend/backend
-    // ever sends sunlight instead of light
-    sunlight: {
-      type: Number,
-      default: null,
-    },
-
-    // ==========================================
-    // RECORD TIME
-    // ==========================================
 
     recordedAt: {
       type: Date,
@@ -81,10 +47,8 @@ const plantDataSchema = new mongoose.Schema(
   }
 );
 
-// ==========================================
-// PREVENT MONGOOSE OVERWRITE ERROR
-// ==========================================
-
+// IMPORTANT:
+// Nodemon/Mongoose duplicate model error avoid karega
 const PlantData =
   mongoose.models.PlantData ||
   mongoose.model("PlantData", plantDataSchema);

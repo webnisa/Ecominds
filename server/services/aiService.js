@@ -1,11 +1,27 @@
-import OpenAI from "openai";
+// server/services/aiService.js
 
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
+import { GoogleGenAI } from "@google/genai";
+
+// ============================================================
+// GEMINI CLIENT
+// ============================================================
+
+if (!process.env.GEMINI_API_KEY) {
+  console.warn(
+    "⚠️ GEMINI_API_KEY is missing. AI will not work."
+  );
+}
+
+const gemini = new GoogleGenAI({
+  apiKey: process.env.GEMINI_API_KEY,
 });
 
+// ============================================================
+// GEMINI MODEL
+// ============================================================
+
 const MODEL =
-  process.env.OPENAI_MODEL || "gpt-5.6-luna";
+  process.env.GEMINI_MODEL || "gemini-3.7-flash";
 
 // ============================================================
 // SAFE JSON PARSER
@@ -13,12 +29,11 @@ const MODEL =
 
 function parseAIJson(text) {
   if (!text) {
-    throw new Error("AI returned an empty response.");
+    throw new Error("Gemini returned an empty response.");
   }
 
   let cleaned = text.trim();
 
-  // Remove markdown code block
   cleaned = cleaned
     .replace(/^```json\s*/i, "")
     .replace(/^```\s*/i, "")
@@ -28,86 +43,299 @@ function parseAIJson(text) {
   try {
     return JSON.parse(cleaned);
   } catch (error) {
-    console.error("❌ AI JSON parsing failed");
+    console.error("❌ Gemini JSON parsing failed:");
     console.error(cleaned);
 
-    throw new Error("AI returned invalid JSON.");
+    throw new Error(
+      "Gemini returned invalid JSON."
+    );
   }
 }
 
 // ============================================================
 // IMAGE AI
-//
-// NOTE:
-// Your current image AI is handled by
-// plantHealthService.js.
-// This function is kept here only if another part
-// of your application uses it.
+// POST /api/ai/analyze-image
 // ============================================================
 
-export const analyzePlantImage = async ({
-  imageBase64,
-  mimeType,
-}) => {
+export const analyzePlantImage = async (file) => {
   try {
-    const response = await client.responses.create({
-      model: MODEL,
+    console.log(
+      "🌱 Starting Gemini plant image analysis..."
+    );
 
-      input: [
-        {
-          role: "user",
+    // --------------------------------------------------------
+    // API KEY
+    // --------------------------------------------------------
 
-          content: [
-            {
-              type: "input_text",
+    if (!process.env.GEMINI_API_KEY) {
+      throw new Error(
+        "GEMINI_API_KEY is missing in server environment."
+      );
+    }
 
-              text: `
-You are an expert plant-care assistant.
+    // --------------------------------------------------------
+    // FILE
+    // --------------------------------------------------------
 
-Analyze the uploaded plant image.
+    if (!file) {
+      throw new Error(
+        "Plant image is required."
+      );
+    }
 
-Return ONLY valid JSON:
+    if (!file.path) {
+      throw new Error(
+        "Uploaded image path not found."
+      );
+    }
+
+    console.log("📦 Processing image:", {
+      path: file.path,
+      mimetype: file.mimetype,
+      originalname: file.originalname,
+      size: file.size,
+    });
+
+    // --------------------------------------------------------
+    // READ IMAGE
+    // --------------------------------------------------------
+
+    const fs = await import("fs");
+
+    if (!fs.existsSync(file.path)) {
+      throw new Error(
+        `Uploaded image does not exist: ${file.path}`
+      );
+    }
+
+    const imageBuffer =
+      fs.readFileSync(file.path);
+
+    if (!imageBuffer.length) {
+      throw new Error(
+        "Uploaded image is empty."
+      );
+    }
+
+    const mimeType =
+      file.mimetype || "image/jpeg";
+
+    const imageBase64 =
+      imageBuffer.toString("base64");
+
+    console.log(
+      "✅ Image converted successfully"
+    );
+
+    // --------------------------------------------------------
+    // PROMPT
+    // --------------------------------------------------------
+
+    const prompt = `
+You are an expert plant health assistant
+for EcoMinds, a smart plant monitoring and
+irrigation application.
+
+Carefully inspect the uploaded plant photograph.
+
+IMPORTANT:
+
+1. Actually analyze the visible plant.
+2. Do NOT automatically call it healthy.
+3. Look for:
+   - yellow leaves
+   - brown leaves
+   - dry leaves
+   - wilting
+   - drooping
+   - holes
+   - spots
+   - discoloration
+   - pest damage
+   - fungal-looking symptoms
+   - weak growth
+   - dehydration
+   - dead portions
+   - overwatering signs
+
+4. Do not invent diseases.
+5. Only report problems reasonably visible.
+6. If the image is unclear, confidence should be low.
+7. Plant identification can be uncertain.
+8. Image analysis CANNOT measure:
+   - soil moisture
+   - temperature
+   - humidity
+   - sunlight intensity
+
+Those values come from EcoMinds sensors.
+
+Return ONLY valid JSON.
+
+Use exactly this structure:
 
 {
   "plantName": "",
   "plantType": "",
   "confidence": 0,
   "healthStatus": "",
+  "healthScore": 0,
   "visibleProblems": [],
   "wateringAdvice": "",
   "sunlightAdvice": "",
   "soilAdvice": "",
   "careTips": [],
-  "warning": ""
+  "overallRecommendation": ""
 }
 
-Rules:
+Health score:
 
-- Identify the plant as accurately as possible.
-- If identification is uncertain, say so.
-- Only describe visible problems.
-- Do not claim to measure soil moisture,
-  temperature or humidity from an image.
-- Give practical beginner-friendly care advice.
-- confidence must be between 0 and 100.
-`,
-            },
+90-100 = Very healthy
+75-89 = Generally healthy
+55-74 = Needs attention
+30-54 = Clearly stressed
+10-29 = Severely damaged
+0-9 = Very likely dead
 
-            {
-              type: "input_image",
+If the plant looks dead, extremely dry,
+collapsed or severely damaged,
+DO NOT return Healthy.
 
-              image_url:
-                `data:${mimeType};base64,${imageBase64}`,
-            },
-          ],
-        },
-      ],
-    });
+Analyze only what can reasonably
+be inferred from the photograph.
+`;
 
-    return parseAIJson(response.output_text);
+    // --------------------------------------------------------
+    // GEMINI REQUEST
+    // --------------------------------------------------------
+
+    console.log(
+      "🤖 Sending image to Gemini..."
+    );
+
+    const response =
+      await gemini.models.generateContent({
+        model: MODEL,
+
+        contents: [
+          {
+            role: "user",
+
+            parts: [
+              {
+                text: prompt,
+              },
+
+              {
+                inlineData: {
+                  mimeType,
+                  data: imageBase64,
+                },
+              },
+            ],
+          },
+        ],
+      });
+
+    // --------------------------------------------------------
+    // RESPONSE
+    // --------------------------------------------------------
+
+    const rawText =
+      response.text || "";
+
+    console.log(
+      "🤖 Gemini RAW IMAGE RESPONSE:",
+      rawText
+    );
+
+    const result =
+      parseAIJson(rawText);
+
+    // --------------------------------------------------------
+    // NORMALIZE
+    // --------------------------------------------------------
+
+    const healthScore =
+      Math.max(
+        0,
+        Math.min(
+          100,
+          Number(
+            result.healthScore
+          ) || 0
+        )
+      );
+
+    const confidence =
+      Math.max(
+        0,
+        Math.min(
+          100,
+          Number(
+            result.confidence
+          ) || 0
+        )
+      );
+
+    const finalResult = {
+      plantName:
+        result.plantName ||
+        "Unknown Plant",
+
+      plantType:
+        result.plantType ||
+        "Unknown",
+
+      confidence,
+
+      healthStatus:
+        result.healthStatus ||
+        "Uncertain",
+
+      healthScore,
+
+      visibleProblems:
+        Array.isArray(
+          result.visibleProblems
+        )
+          ? result.visibleProblems
+          : [],
+
+      wateringAdvice:
+        result.wateringAdvice ||
+        "Monitor soil moisture before watering.",
+
+      sunlightAdvice:
+        result.sunlightAdvice ||
+        "Provide suitable sunlight for the plant.",
+
+      soilAdvice:
+        result.soilAdvice ||
+        "Use suitable, well-drained soil.",
+
+      careTips:
+        Array.isArray(
+          result.careTips
+        )
+          ? result.careTips
+          : [],
+
+      overallRecommendation:
+        result.overallRecommendation ||
+        "Continue monitoring the plant.",
+    };
+
+    console.log(
+      "🌱 GEMINI IMAGE RESULT:",
+      finalResult
+    );
+
+    return finalResult;
+
   } catch (error) {
     console.error(
-      "❌ AI image analysis error:",
+      "❌ GEMINI IMAGE AI ERROR:",
       error
     );
 
@@ -116,7 +344,7 @@ Rules:
 };
 
 // ============================================================
-// SENSOR HISTORY → AI PLANT HEALTH PREDICTION
+// SENSOR HISTORY → AI HEALTH PREDICTION
 // ============================================================
 
 export const predictPlantHealth = async ({
@@ -125,8 +353,20 @@ export const predictPlantHealth = async ({
   careHistory = [],
 }) => {
   try {
+    console.log(
+      "🌱 Starting Gemini sensor health prediction..."
+    );
+
+    if (!process.env.GEMINI_API_KEY) {
+      throw new Error(
+        "GEMINI_API_KEY is missing."
+      );
+    }
+
     if (!plant) {
-      throw new Error("Plant information is required.");
+      throw new Error(
+        "Plant information is required."
+      );
     }
 
     if (!Array.isArray(sensorData)) {
@@ -138,29 +378,37 @@ export const predictPlantHealth = async ({
     }
 
     // ========================================================
-    // FORMAT SENSOR HISTORY
+    // FORMAT SENSOR DATA
     // ========================================================
 
     const formattedSensorData =
       sensorData.map((item) => ({
-        date: item.recordedAt,
+        date:
+          item.recordedAt || null,
 
         soilMoisture:
-          item.soilMoisture ?? null,
+          item.soilMoisture ??
+          item.moisture ??
+          null,
 
         temperature:
-          item.temperature ?? null,
+          item.temperature ??
+          null,
 
         humidity:
-          item.humidity ?? null,
+          item.humidity ??
+          null,
 
-        // ☀️ IMPORTANT
+        // ☀️ SUNLIGHT SENSOR
         light:
-          item.light ?? null,
+          item.light ??
+          item.sunlight ??
+          item.lightLevel ??
+          null,
       }));
 
     // ========================================================
-    // FORMAT CARE HISTORY
+    // CARE HISTORY
     // ========================================================
 
     const formattedCareHistory =
@@ -171,17 +419,11 @@ export const predictPlantHealth = async ({
           null,
 
         careType:
-          item.careType ||
-          "",
+          item.careType || "",
 
         notes:
-          item.notes ||
-          "",
+          item.notes || "",
       }));
-
-    // ========================================================
-    // SENSOR DATA COUNT
-    // ========================================================
 
     const dataPointsUsed =
       formattedSensorData.length;
@@ -192,37 +434,34 @@ export const predictPlantHealth = async ({
 
     const prompt = `
 You are the AI plant-health prediction system
-for a smart irrigation application called EcoMinds.
+for EcoMinds.
 
-You are analyzing REAL SENSOR HISTORY collected
-from an IoT plant monitoring system.
+EcoMinds receives REAL IoT sensor data.
 
-The available sensors are:
+Sensors:
 
 💧 Soil Moisture
 🌡️ Temperature
 💨 Air Humidity
 ☀️ Light / Sunlight
 
-Your job is to analyze the recent history and
-predict the plant's current health and possible
-watering/sunlight needs.
+Analyze the recent sensor history.
 
 ==================================================
-PLANT INFORMATION
+PLANT
 ==================================================
 
-Plant Name:
+Name:
 ${plant.plantName || "Unknown"}
 
-Plant Type:
+Type:
 ${plant.plantType || "Unknown"}
 
 Location:
 ${plant.location || "Unknown"}
 
-Watering Frequency:
-${plant.wateringFrequency || "Unknown"} days
+Watering frequency:
+${plant.wateringFrequency || "Unknown"}
 
 ==================================================
 SENSOR HISTORY
@@ -245,174 +484,123 @@ ${JSON.stringify(
 )}
 
 ==================================================
-IMPORTANT SENSOR ANALYSIS RULES
+ANALYSIS RULES
 ==================================================
 
-1. Analyze the actual sensor history.
+1. Use the actual sensor values.
 
-2. Look for decreasing soil moisture.
+2. Analyze soil moisture trends.
 
-3. If soil moisture has stayed low for
-   several readings/days, consider possible
-   watering need.
+3. Low moisture for several readings
+   may indicate watering need.
 
-4. If soil moisture remains extremely high,
-   consider possible overwatering.
+4. Extremely high moisture may indicate
+   overwatering.
 
 5. Analyze temperature trends.
 
 6. Analyze humidity trends.
 
-7. Analyze light/sunlight readings.
+7. Analyze sunlight/light readings.
 
-8. Consistently low light may indicate that
-   the plant is not receiving enough light.
+8. Low light may indicate insufficient light.
 
-9. Very high light combined with high temperature
+9. Very high light + high temperature
    may indicate possible heat/light stress.
 
-10. Do NOT assume more sunlight is always better.
+10. Do not assume more sunlight is always better.
 
-11. Consider plant type when giving sunlight advice.
+11. Consider plant type.
 
-12. Combine light and temperature together
-    when evaluating possible heat stress.
+12. Combine sunlight and temperature.
 
-13. Do not claim certainty when sensor data
-    is insufficient.
+13. Do not invent sensor values.
 
-14. If fewer than 3 meaningful sensor readings
-    are available, clearly mention that the
-    prediction has limited confidence.
+14. Do not invent diseases.
 
-15. Do not invent sensor values.
+15. If fewer than 3 useful readings exist,
+    mention limited confidence.
 
-16. Do not invent diseases.
+16. Explain WHY the plant received its score.
 
-17. Use watering history if available.
-
-18. Explain WHY the plant is predicted to be
-    healthy, stressed or critical.
+17. Give practical recommendations.
 
 ==================================================
-RETURN ONLY VALID JSON
+RETURN ONLY JSON
 ==================================================
-
-Return exactly this structure:
 
 {
   "healthScore": 0,
-
   "status": "healthy",
-
   "riskLevel": "low",
-
   "trend": "stable",
-
   "analysis": "",
-
   "recommendation": "",
-
   "factors": [
     {
       "factor": "",
       "impact": "positive"
     }
   ],
-
   "prediction": "",
-
   "wateringNeeded": false,
-
   "suggestedWateringReason": "",
-
   "sunlightStatus": "",
-
   "sunlightRecommendation": "",
-
   "dataPointsUsed": 0
 }
 
-==================================================
-ALLOWED VALUES
-==================================================
+Allowed status:
 
-status:
-- healthy
-- warning
-- critical
+healthy
+warning
+critical
 
-riskLevel:
-- low
-- medium
-- high
+Allowed risk:
 
-trend:
-- improving
-- stable
-- declining
+low
+medium
+high
 
-factor impact:
-- positive
-- negative
-- neutral
+Allowed trend:
 
-==================================================
-HEALTH SCORE
-==================================================
+improving
+stable
+declining
 
-90-100:
-Excellent conditions.
+Factor impact:
 
-75-89:
-Generally healthy.
+positive
+negative
+neutral
 
-50-74:
-Needs some attention.
+Health score:
 
-25-49:
-Stressed.
-
-0-24:
-Critical condition.
-
-==================================================
-IMPORTANT
-==================================================
-
-The AI prediction should be based on:
-
-💧 moisture
-🌡️ temperature
-💨 humidity
-☀️ sunlight/light
-🌱 plant type
-💦 watering history
-📅 recent sensor trend
-
-Do not say that the plant definitely has a disease.
-
-Return ONLY JSON.
+90-100 = Excellent
+75-89 = Generally healthy
+50-74 = Needs attention
+25-49 = Stressed
+0-24 = Critical
 `;
 
+    // ========================================================
+    // GEMINI REQUEST
+    // ========================================================
+
     console.log(
-      "🤖 Sending sensor history to AI..."
+      "🤖 Sending sensor history to Gemini..."
     );
 
-    // ========================================================
-    // OPENAI
-    // ========================================================
-
     const response =
-      await client.responses.create({
+      await gemini.models.generateContent({
         model: MODEL,
 
-        input: [
+        contents: [
           {
             role: "user",
-            content: [
+
+            parts: [
               {
-                type: "input_text",
                 text: prompt,
               },
             ],
@@ -421,25 +609,34 @@ Return ONLY JSON.
       });
 
     // ========================================================
-    // RESPONSE
+    // PARSE RESPONSE
     // ========================================================
 
+    const rawText =
+      response.text || "";
+
+    console.log(
+      "🤖 Gemini SENSOR RAW RESPONSE:",
+      rawText
+    );
+
     const result =
-      parseAIJson(
-        response.output_text
-      );
+      parseAIJson(rawText);
 
     // ========================================================
     // NORMALIZE
     // ========================================================
 
-    const healthScore = Math.max(
-      0,
-      Math.min(
-        100,
-        Number(result.healthScore) || 0
-      )
-    );
+    const healthScore =
+      Math.max(
+        0,
+        Math.min(
+          100,
+          Number(
+            result.healthScore
+          ) || 0
+        )
+      );
 
     const allowedStatus = [
       "healthy",
@@ -492,13 +689,14 @@ Return ONLY JSON.
         "Continue monitoring the plant.",
 
       factors:
-        Array.isArray(result.factors)
+        Array.isArray(
+          result.factors
+        )
           ? result.factors
           : [],
 
       prediction:
-        result.prediction ||
-        "",
+        result.prediction || "",
 
       wateringNeeded:
         Boolean(
@@ -515,14 +713,13 @@ Return ONLY JSON.
 
       sunlightRecommendation:
         result.sunlightRecommendation ||
-        "Continue monitoring light conditions.",
+        "Continue monitoring sunlight.",
 
-      dataPointsUsed:
-        dataPointsUsed,
+      dataPointsUsed,
     };
 
     console.log(
-      "🌱 SENSOR AI RESULT:",
+      "🌱 GEMINI SENSOR AI RESULT:",
       finalResult
     );
 
@@ -530,7 +727,7 @@ Return ONLY JSON.
 
   } catch (error) {
     console.error(
-      "❌ AI health prediction error:",
+      "❌ Gemini sensor AI error:",
       error
     );
 

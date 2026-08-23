@@ -32,6 +32,7 @@ import pumpRoutes from "./routes/pumpRoutes.js";
 import deviceRoutes from "./routes/deviceRoutes.js";
 import pumpPreferenceRoutes from "./routes/pumpPreferenceRoutes.js";
 import pointsRoutes from "./routes/pointsRoutes.js";
+import monitoringRoutes from "./routes/monitoringRoutes.js";
 import todoRoutes from "./routes/todoRoutes.js";
 
 dotenv.config();
@@ -106,6 +107,11 @@ app.use("/api/devices", deviceRoutes);
 
 app.use("/api/points", pointsRoutes);
 app.use("/api/todos", todoRoutes);
+
+app.use(
+  "/api/monitoring",
+  monitoringRoutes
+);
 
 app.use(
   "/api/pump-preference",

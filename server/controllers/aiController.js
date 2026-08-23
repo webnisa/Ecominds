@@ -1,3 +1,8 @@
+// ============================================================
+// IMAGE AI
+// POST /api/ai/analyze-image
+// ============================================================
+
 import {
   analyzePlantImage as analyzeImageService,
 } from "../services/plantHealthService.js";
@@ -9,18 +14,15 @@ import {
   predictPlantHealth,
 } from "../services/aiService.js";
 
+
 // ============================================================
-// IMAGE AI
-// POST /api/ai/analyze-image
+// GEMINI IMAGE ANALYSIS
 // ============================================================
 
-export async function analyzePlantImage(
-  req,
-  res
-) {
+export async function analyzePlantImage(req, res) {
   try {
     console.log(
-      "🌱 AI IMAGE REQUEST RECEIVED"
+      "🌱 GEMINI AI IMAGE REQUEST RECEIVED"
     );
 
     // --------------------------------------------------------
@@ -40,10 +42,10 @@ export async function analyzePlantImage(
     }
 
     console.log(
-      "📦 Multer file object received"
+      "📦 Multer file received:"
     );
 
-    console.log("📸 File:", {
+    console.log({
       fieldname:
         req.file.fieldname,
 
@@ -61,11 +63,7 @@ export async function analyzePlantImage(
     });
 
     // --------------------------------------------------------
-    // IMPORTANT
-    //
-    // Send complete multer file object.
-    //
-    // This keeps your existing image AI working.
+    // SEND TO GEMINI
     // --------------------------------------------------------
 
     const result =
@@ -74,9 +72,13 @@ export async function analyzePlantImage(
       );
 
     console.log(
-      "🤖 IMAGE AI RESULT:",
+      "🌱 GEMINI IMAGE RESULT:",
       result
     );
+
+    // --------------------------------------------------------
+    // SUCCESS
+    // --------------------------------------------------------
 
     return res.status(200).json({
       success: true,
@@ -86,29 +88,82 @@ export async function analyzePlantImage(
     });
 
   } catch (error) {
+
     console.error(
-      "❌ REAL IMAGE AI ERROR:",
+      "❌ GEMINI IMAGE AI ERROR:",
       error
     );
 
-    // --------------------------------------------------------
-    // OPENAI CREDIT ERROR
-    // --------------------------------------------------------
+    // ========================================================
+    // GEMINI 503
+    // ========================================================
 
     if (
-      error?.status === 429 ||
-      error?.code ===
-        "insufficient_quota" ||
-      error?.code ===
-        "credit_balance_exhausted"
+      error?.status === 503 ||
+      error?.code === 503
     ) {
+
+      return res.status(503).json({
+        success: false,
+
+        message:
+          "Gemini AI is temporarily busy. Please try again in a few seconds.",
+      });
+    }
+
+    // ========================================================
+    // GEMINI 429
+    // ========================================================
+
+    if (
+      error?.status === 429
+    ) {
+
       return res.status(429).json({
         success: false,
 
         message:
-          "OpenAI API credits are exhausted. Please add credits to continue AI analysis.",
+          "Gemini API limit has been reached. Please try again later.",
       });
     }
+
+    // ========================================================
+    // GEMINI 400
+    // ========================================================
+
+    if (
+      error?.status === 400
+    ) {
+
+      return res.status(400).json({
+        success: false,
+
+        message:
+          "Gemini could not process this image. Please upload a clear plant image.",
+      });
+    }
+
+    // ========================================================
+    // API KEY
+    // ========================================================
+
+    if (
+      error?.message?.includes(
+        "GEMINI_API_KEY"
+      )
+    ) {
+
+      return res.status(500).json({
+        success: false,
+
+        message:
+          "Gemini API key is missing or not configured correctly.",
+      });
+    }
+
+    // ========================================================
+    // GENERIC ERROR
+    // ========================================================
 
     return res.status(500).json({
       success: false,
@@ -120,16 +175,15 @@ export async function analyzePlantImage(
   }
 }
 
+
 // ============================================================
 // SENSOR AI PREDICTION
 // POST /api/ai/predict-health/:plantId
 // ============================================================
 
-export async function predictHealth(
-  req,
-  res
-) {
+export async function predictHealth(req, res) {
   try {
+
     const clerkId =
       req.auth?.userId ||
       req.userId;
@@ -138,9 +192,15 @@ export async function predictHealth(
       plantId,
     } = req.params;
 
+    // --------------------------------------------------------
+    // AUTH
+    // --------------------------------------------------------
+
     if (!clerkId) {
+
       return res.status(401).json({
         success: false,
+
         message:
           "Unauthorized.",
       });
@@ -157,8 +217,10 @@ export async function predictHealth(
       });
 
     if (!plant) {
+
       return res.status(404).json({
         success: false,
+
         message:
           "Plant not found.",
       });
@@ -175,14 +237,21 @@ export async function predictHealth(
       fiveDaysAgo.getDate() - 5
     );
 
+    // --------------------------------------------------------
+    // SENSOR DATA
+    // --------------------------------------------------------
+
     const sensorData =
       await PlantData.find({
-        plantId: plant._id,
+        plantId:
+          plant._id,
 
-        userId: clerkId,
+        userId:
+          clerkId,
 
         recordedAt: {
-          $gte: fiveDaysAgo,
+          $gte:
+            fiveDaysAgo,
         },
       })
         .sort({
@@ -194,15 +263,17 @@ export async function predictHealth(
       !sensorData ||
       sensorData.length === 0
     ) {
+
       return res.status(400).json({
         success: false,
+
         message:
           "No sensor history available for this plant.",
       });
     }
 
     // --------------------------------------------------------
-    // AI
+    // AI PREDICTION
     // --------------------------------------------------------
 
     const result =
@@ -213,6 +284,10 @@ export async function predictHealth(
 
         careHistory: [],
       });
+
+    // --------------------------------------------------------
+    // RESPONSE
+    // --------------------------------------------------------
 
     return res.status(200).json({
       success: true,
@@ -227,6 +302,7 @@ export async function predictHealth(
     });
 
   } catch (error) {
+
     console.error(
       "❌ Sensor AI prediction error:",
       error
