@@ -1,6 +1,5 @@
 import Plant from "../models/Plant.js";
 
-
 // ==========================================
 // ADD PLANT
 // ==========================================
@@ -13,22 +12,25 @@ export const addPlant = async (req, res) => {
       plantName,
       plantType,
       location,
-      image,
-      notes,
+      wateringFrequency,
     } = req.body;
 
-
-    // ==========================================
-    // VALIDATION
-    // ==========================================
-
-    if (!plantName) {
+    if (!plantName || !plantName.trim()) {
       return res.status(400).json({
         success: false,
         message: "Plant name is required",
       });
     }
 
+    // ==========================================
+    // IMAGE
+    // ==========================================
+
+    let image = "";
+
+    if (req.file) {
+      image = `/uploads/plants/${req.file.filename}`;
+    }
 
     // ==========================================
     // CREATE PLANT
@@ -37,58 +39,40 @@ export const addPlant = async (req, res) => {
     const plant = await Plant.create({
       userId: clerkId,
 
-      plantName,
+      plantName: plantName.trim(),
 
-      plantType:
-        plantType || "",
+      plantType: plantType || "",
 
-      location:
-        location || "",
+      location: location || "",
 
-      image:
-        image || "",
+      image,
 
-      notes:
-        notes || "",
+      wateringFrequency:
+        Number(wateringFrequency) || 7,
     });
 
-
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
-
-      message:
-        "Plant added successfully 🌱",
-
+      message: "Plant added successfully 🌱",
       plant,
     });
-
   } catch (error) {
+    console.error("Add plant error:", error);
 
-    console.error(
-      "Add plant error:",
-      error
-    );
-
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
-
-      message:
-        "Failed to add plant",
+      message: "Failed to add plant",
     });
   }
 };
 
-
-
 // ==========================================
-// GET ALL USER PLANTS
+// GET ALL PLANTS
 // ==========================================
 
 export const getPlants = async (req, res) => {
   try {
-
     const clerkId = req.userId;
-
 
     const plants = await Plant.find({
       userId: clerkId,
@@ -96,32 +80,21 @@ export const getPlants = async (req, res) => {
       createdAt: -1,
     });
 
-
-    res.json({
+    return res.json({
       success: true,
-
       count: plants.length,
-
       plants,
     });
-
   } catch (error) {
+    console.error("Get plants error:", error);
 
-    console.error(
-      "Get plants error:",
-      error
-    );
-
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
-
-      message:
-        "Failed to fetch plants",
+      message: "Failed to fetch plants",
+      error: error.message,
     });
   }
 };
-
-
 
 // ==========================================
 // GET SINGLE PLANT
@@ -129,217 +102,154 @@ export const getPlants = async (req, res) => {
 
 export const getPlant = async (req, res) => {
   try {
-
     const clerkId = req.userId;
-
     const { plantId } = req.params;
-
 
     const plant = await Plant.findOne({
       _id: plantId,
       userId: clerkId,
     });
 
-
     if (!plant) {
       return res.status(404).json({
         success: false,
-
-        message:
-          "Plant not found",
+        message: "Plant not found",
       });
     }
 
-
-    res.json({
+    return res.json({
       success: true,
-
       plant,
     });
-
   } catch (error) {
+    console.error("Get plant error:", error);
 
-    console.error(
-      "Get plant error:",
-      error
-    );
-
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
-
-      message:
-        "Failed to fetch plant",
+      message: "Failed to fetch plant",
+      error: error.message,
     });
   }
 };
-
-
 
 // ==========================================
 // UPDATE PLANT
 // ==========================================
 
-export const updatePlant = async (
-  req,
-  res
-) => {
+export const updatePlant = async (req, res) => {
   try {
-
     const clerkId = req.userId;
-
     const { plantId } = req.params;
-
 
     const {
       plantName,
       plantType,
       location,
-      image,
+      wateringFrequency,
       notes,
     } = req.body;
 
+    const updateData = {};
+
+    if (plantName !== undefined) {
+      updateData.plantName = plantName;
+    }
+
+    if (plantType !== undefined) {
+      updateData.plantType = plantType;
+    }
+
+    if (location !== undefined) {
+      updateData.location = location;
+    }
+
+    if (wateringFrequency !== undefined) {
+      updateData.wateringFrequency =
+        Number(wateringFrequency);
+    }
+
+    if (notes !== undefined) {
+      updateData.notes = notes;
+    }
+
+    // ==========================================
+    // NEW IMAGE
+    // ==========================================
+
+    if (req.file) {
+      updateData.image =
+        `/uploads/plants/${req.file.filename}`;
+    }
 
     const plant =
       await Plant.findOneAndUpdate(
-
         {
           _id: plantId,
-
           userId: clerkId,
         },
-
-        {
-          ...(plantName !== undefined && {
-            plantName,
-          }),
-
-          ...(plantType !== undefined && {
-            plantType,
-          }),
-
-          ...(location !== undefined && {
-            location,
-          }),
-
-          ...(image !== undefined && {
-            image,
-          }),
-
-          ...(notes !== undefined && {
-            notes,
-          }),
-        },
-
+        updateData,
         {
           new: true,
-
           runValidators: true,
         }
       );
 
-
     if (!plant) {
-
       return res.status(404).json({
         success: false,
-
-        message:
-          "Plant not found",
+        message: "Plant not found",
       });
     }
 
-
-    res.json({
+    return res.json({
       success: true,
-
-      message:
-        "Plant updated successfully 🌱",
-
+      message: "Plant updated successfully 🌱",
       plant,
     });
-
   } catch (error) {
+    console.error("Update plant error:", error);
 
-    console.error(
-      "Update plant error:",
-      error
-    );
-
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
-
-      message:
-        "Failed to update plant",
+      message: "Failed to update plant",
+      error: error.message,
     });
   }
 };
-
-
 
 // ==========================================
 // DELETE PLANT
 // ==========================================
 
-export const deletePlant = async (
-  req,
-  res
-) => {
+export const deletePlant = async (req, res) => {
   try {
-
     const clerkId = req.userId;
-
     const { plantId } = req.params;
-
 
     const plant =
       await Plant.findOneAndDelete({
-
         _id: plantId,
-
         userId: clerkId,
-
       });
-
 
     if (!plant) {
-
       return res.status(404).json({
-
         success: false,
-
-        message:
-          "Plant not found",
-
+        message: "Plant not found",
       });
-
     }
 
-
-    res.json({
-
+    return res.json({
       success: true,
-
-      message:
-        "Plant deleted successfully 🌱",
-
+      message: "Plant deleted successfully 🌱",
     });
-
   } catch (error) {
+    console.error("Delete plant error:", error);
 
-    console.error(
-      "Delete plant error:",
-      error
-    );
-
-
-    res.status(500).json({
-
+    return res.status(500).json({
       success: false,
-
-      message:
-        "Failed to delete plant",
-
+      message: "Failed to delete plant",
+      error: error.message,
     });
-
   }
 };

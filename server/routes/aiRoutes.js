@@ -1,40 +1,136 @@
 import express from "express";
+import multer from "multer";
+import path from "path";
+import fs from "fs";
 
 import {
-  analyzePlant,
-  getLatestPlantHealth,
-  getPlantHealthHistory,
+  analyzePlantImage,
 } from "../controllers/aiController.js";
-
-import {
-  requireAuth,
-} from "../middleware/authMiddleware.js";
-
 
 const router = express.Router();
 
 
-// Analyze current plant health
+// ============================================================
+// UPLOAD DIRECTORY
+// ============================================================
+
+const uploadDir =
+  path.join(
+    process.cwd(),
+    "uploads",
+    "ai-plants"
+  );
+
+
+if (!fs.existsSync(uploadDir)) {
+
+  fs.mkdirSync(
+    uploadDir,
+    {
+      recursive: true,
+    }
+  );
+}
+
+
+// ============================================================
+// MULTER
+// ============================================================
+
+const storage =
+  multer.diskStorage({
+
+    destination: (
+      req,
+      file,
+      cb
+    ) => {
+
+      cb(
+        null,
+        uploadDir
+      );
+    },
+
+
+    filename: (
+      req,
+      file,
+      cb
+    ) => {
+
+      const extension =
+        path.extname(
+          file.originalname
+        ).toLowerCase() ||
+        ".jpg";
+
+
+      const filename =
+        `${Date.now()}-${Math.round(
+          Math.random() * 100000000
+        )}${extension}`;
+
+
+      cb(
+        null,
+        filename
+      );
+    },
+
+  });
+
+
+const upload =
+  multer({
+
+    storage,
+
+    limits: {
+      fileSize:
+        10 * 1024 * 1024,
+    },
+
+    fileFilter: (
+      req,
+      file,
+      cb
+    ) => {
+
+      if (
+        file.mimetype &&
+        file.mimetype.startsWith(
+          "image/"
+        )
+      ) {
+
+        cb(
+          null,
+          true
+        );
+
+      } else {
+
+        cb(
+          new Error(
+            "Only image files are allowed."
+          )
+        );
+
+      }
+    },
+
+  });
+
+
+// ============================================================
+// ANALYZE IMAGE
+// ============================================================
+
 router.post(
-  "/analyze/:plantId",
-  requireAuth,
-  analyzePlant
-);
-
-
-// Latest health result
-router.get(
-  "/health/:plantId",
-  requireAuth,
-  getLatestPlantHealth
-);
-
-
-// Health history
-router.get(
-  "/health-history/:plantId",
-  requireAuth,
-  getPlantHealthHistory
+  "/analyze-image",
+  upload.single("image"),
+  analyzePlantImage
 );
 
 

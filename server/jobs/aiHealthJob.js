@@ -1,164 +1,177 @@
+// server/jobs/aiHealthJob.js
+
 import cron from "node-cron";
-
 import Plant from "../models/Plant.js";
-import HealthHistory from "../models/HealthHistory.js";
-
 import {
   analyzePlantHealth,
 } from "../services/plantHealthService.js";
 
-import {
-  createHealthActions,
-} from "../services/aiActionService.js";
+/*
+|--------------------------------------------------------------------------
+| AI HEALTH JOB
+|--------------------------------------------------------------------------
+| Ye background job plants ki saved sensor history ko check karega.
+|
+| IMPORTANT:
+| Ye tumhare image-upload AI ko replace nahi karta.
+| Image analysis /api/ai/analyze-image independently chalega.
+|--------------------------------------------------------------------------
+*/
 
+let aiHealthJob = null;
 
-// ==========================================
-// DAILY AI HEALTH ANALYSIS
-// ==========================================
+/*
+|--------------------------------------------------------------------------
+| Run AI Health Check
+|--------------------------------------------------------------------------
+*/
 
-export const startAIHealthJob = () => {
+export const runAIHealthCheck = async () => {
+  try {
+    console.log("🌱 AI Health Job Started...");
 
-  // Runs every day at 11:55 PM
-  cron.schedule("55 23 * * *", async () => {
+    const plants = await Plant.find({});
 
-    console.log(
-      "🤖 Daily AI plant health analysis started..."
-    );
-
-
-    try {
-
-      const plants =
-        await Plant.find({});
-
-
-      console.log(
-        `🌱 Found ${plants.length} plants`
-      );
-
-
-      for (const plant of plants) {
-
-        try {
-
-          // ==========================================
-          // ANALYZE PLANT
-          // ==========================================
-
-          const result =
-            await analyzePlantHealth({
-
-              userId:
-                plant.userId,
-
-              plantId:
-                plant._id,
-
-            });
-
-
-          // ==========================================
-          // SAVE HEALTH HISTORY
-          // ==========================================
-
-          const health =
-            await HealthHistory.create({
-
-              userId:
-                plant.userId,
-
-              plantId:
-                plant._id,
-
-              healthScore:
-                result.healthScore,
-
-              healthStatus:
-                result.healthStatus,
-
-              riskLevel:
-                result.riskLevel,
-
-              prediction:
-                result.prediction,
-
-              recommendation:
-                result.recommendation,
-
-              analysis:
-                result.analysis,
-
-              sensorSummary:
-                result.sensorSummary,
-
-              analyzedAt:
-                new Date(),
-
-            });
-
-
-          // ==========================================
-          // CREATE REMINDERS
-          // ==========================================
-
-          const reminders =
-            await createHealthActions({
-
-              userId:
-                plant.userId,
-
-              plantId:
-                plant._id,
-
-              healthResult:
-                result,
-
-            });
-
-
-          console.log(
-            `✅ ${plant.plantName} analyzed | Score: ${result.healthScore}`
-          );
-
-
-          if (reminders.length > 0) {
-
-            console.log(
-              `🔔 ${reminders.length} reminder(s) created`
-            );
-
-          }
-
-
-        } catch (plantError) {
-
-          console.error(
-            `❌ Failed to analyze plant ${plant._id}:`,
-            plantError.message
-          );
-
-        }
-
-      }
-
-
-      console.log(
-        "🤖 Daily AI health analysis completed."
-      );
-
-
-    } catch (error) {
-
-      console.error(
-        "❌ AI health job error:",
-        error
-      );
-
+    if (!plants || plants.length === 0) {
+      console.log("🌱 No plants found for AI health check.");
+      return;
     }
 
-  });
+    console.log(`🌱 Checking ${plants.length} plant(s)...`);
+
+    for (const plant of plants) {
+      try {
+        /*
+         * Sensor data available ho to AI health analysis.
+         * Agar sensor history abhi nahi hai to plant skip hoga.
+         */
+
+        const sensorData = {
+          moisture: plant.moisture ?? null,
+          temperature: plant.temperature ?? null,
+          humidity: plant.humidity ?? null,
+          nutrients: plant.nutrients ?? null,
+        };
+
+        const hasSensorData = Object.values(sensorData).some(
+          (value) =>
+            value !== null &&
+            value !== undefined &&
+            value !== ""
+        );
+
+        if (!hasSensorData) {
+          console.log(
+            `⚠️ No sensor data for plant: ${plant.name}`
+          );
+
+          continue;
+        }
+
+        const result = await analyzePlantHealth({
+          plant,
+          sensorData,
+        });
+
+        if (!result) {
+          console.log(
+            `⚠️ No AI result for: ${plant.name}`
+          );
+
+          continue;
+        }
+
+        /*
+         * Save AI result if fields exist.
+         */
+
+        if (result.healthScore !== undefined) {
+          plant.healthScore = result.healthScore;
+        }
+
+        if (result.healthStatus) {
+          plant.health = result.healthStatus;
+        }
+
+        if (result.overallRecommendation) {
+          plant.aiInsight =
+            result.overallRecommendation;
+        }
+
+        await plant.save();
+
+        console.log(
+          `✅ AI health updated: ${plant.name}`
+        );
+      } catch (plantError) {
+        console.error(
+          `❌ AI health failed for ${plant.name}:`,
+          plantError.message
+        );
+
+        // One plant fail hone par baaki plants continue honge.
+        continue;
+      }
+    }
+
+    console.log("🌱 AI Health Job Finished.");
+  } catch (error) {
+    console.error(
+      "❌ AI Health Job Error:",
+      error
+    );
+  }
+};
+
+/*
+|--------------------------------------------------------------------------
+| START JOB
+|--------------------------------------------------------------------------
+|
+| Every day at 9:00 AM.
+|
+*/
+
+export const startAIHealthJob = () => {
+  if (aiHealthJob) {
+    console.log(
+      "⚠️ AI Health Job already running."
+    );
+
+    return aiHealthJob;
+  }
+
+  aiHealthJob = cron.schedule(
+    "0 9 * * *",
+    async () => {
+      console.log(
+        "⏰ Daily AI plant health check..."
+      );
+
+      await runAIHealthCheck();
+    }
+  );
 
   console.log(
-    "⏰ Daily AI health job scheduled."
+    "✅ AI Health Job scheduled — every day at 9:00 AM."
   );
+
+  return aiHealthJob;
+};
+
+/*
+|--------------------------------------------------------------------------
+| OPTIONAL STOP FUNCTION
+|--------------------------------------------------------------------------
+*/
+
+export const stopAIHealthJob = () => {
+  if (aiHealthJob) {
+    aiHealthJob.stop();
+    aiHealthJob = null;
+
+    console.log(
+      "🛑 AI Health Job stopped."
+    );
+  }
 };

@@ -1,178 +1,242 @@
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+
+const MODEL =
+  process.env.OPENAI_MODEL || "gpt-5.6-luna";
+
+
 // ==========================================
-// AI SERVICE
+// IMAGE → PLANT AI
 // ==========================================
 
-export const generatePlantPrediction = async ({
-  plant,
-  readings,
-  basicAnalysis,
+export const analyzePlantImage = async ({
+  imageBase64,
+  mimeType,
 }) => {
   try {
-    /*
-      Abhi hum AI provider ko directly connect nahi kar rahe.
+    const response = await client.responses.create({
+      model: MODEL,
 
-      Ye function future mein:
-      OpenAI / Gemini / other AI API
-      ko call karega.
+      input: [
+        {
+          role: "user",
 
-      Filhaal basic analysis ko structured
-      prediction mein convert kar raha hai.
-    */
+          content: [
+            {
+              type: "input_text",
 
-    if (!readings || readings.length === 0) {
-      return {
-        healthStatus: "insufficient_data",
+              text: `
+You are an expert plant-care assistant.
 
-        healthScore: null,
+Analyze the uploaded plant image.
 
-        riskLevel: "unknown",
+Return ONLY valid JSON in this exact structure:
 
-        prediction:
-          "Not enough plant data available for prediction.",
+{
+  "plantName": "",
+  "plantType": "",
+  "confidence": 0,
+  "healthStatus": "",
+  "visibleProblems": [],
+  "wateringAdvice": "",
+  "sunlightAdvice": "",
+  "soilAdvice": "",
+  "careTips": [],
+  "warning": ""
+}
 
-        recommendation:
-          "Continue collecting plant sensor data.",
-      };
-    }
+Rules:
 
+- Identify the plant as accurately as possible.
+- If identification is uncertain, clearly say so.
+- Do not pretend that image alone can measure soil moisture,
+  temperature or humidity.
+- Only describe visible problems.
+- Give practical beginner-friendly care advice.
+- confidence must be between 0 and 100.
+`,
 
-    // ------------------------------------------
-    // Calculate moisture trend
-    // ------------------------------------------
+            },
 
-    const moistureValues = readings
-      .map((item) => item.soilMoisture)
-      .filter(
-        (value) =>
-          value !== undefined &&
-          value !== null
-      );
+            {
+              type: "input_image",
 
+              image_url:
+                `data:${mimeType};base64,${imageBase64}`,
 
-    let moistureTrend = "stable";
+            },
+          ],
+        },
+      ],
+    });
 
+    const text =
+      response.output_text;
 
-    if (moistureValues.length >= 2) {
-
-      const first =
-        moistureValues[0];
-
-      const last =
-        moistureValues[
-          moistureValues.length - 1
-        ];
-
-
-      if (last < first - 10) {
-        moistureTrend = "decreasing";
-      }
-
-      if (last > first + 10) {
-        moistureTrend = "increasing";
-      }
-    }
-
-
-    // ------------------------------------------
-    // Calculate prediction
-    // ------------------------------------------
-
-    let prediction =
-      "Plant conditions appear stable.";
-
-
-    if (
-      basicAnalysis.healthStatus ===
-      "at_risk"
-    ) {
-      prediction =
-        "The plant may be at risk if the current environmental conditions continue.";
-    }
-
-
-    if (
-      moistureTrend === "decreasing"
-    ) {
-      prediction =
-        "Soil moisture is decreasing. Continued low moisture may cause water stress.";
-    }
-
-
-    if (
-      moistureTrend === "increasing"
-    ) {
-      prediction =
-        "Soil moisture is increasing. Monitor the plant to avoid excessive watering.";
-    }
-
-
-    // ------------------------------------------
-    // Recommendation
-    // ------------------------------------------
-
-    let recommendation =
-      "Continue monitoring the plant regularly.";
-
-
-    if (
-      basicAnalysis.risks?.includes(
-        "dehydration"
-      )
-    ) {
-      recommendation =
-        "Check soil moisture and water the plant if required.";
-    }
-
-
-    if (
-      basicAnalysis.risks?.includes(
-        "overwatering"
-      )
-    ) {
-      recommendation =
-        "Avoid additional watering and check soil drainage.";
-    }
-
-
-    return {
-
-      plantId: plant._id,
-
-      plantName: plant.plantName,
-
-      healthStatus:
-        basicAnalysis.healthStatus,
-
-      healthScore:
-        basicAnalysis.healthScore,
-
-      riskLevel:
-        basicAnalysis.healthStatus ===
-        "at_risk"
-          ? "high"
-          : basicAnalysis.healthStatus ===
-            "needs_attention"
-          ? "medium"
-          : "low",
-
-      moistureTrend,
-
-      prediction,
-
-      recommendation,
-
-      analyzedReadings:
-        readings.length,
-
-    };
+    return JSON.parse(text);
 
   } catch (error) {
 
     console.error(
-      "AI service error:",
+      "AI image analysis error:",
       error
     );
 
-    throw error;
+    throw new Error(
+      "Failed to analyze plant image"
+    );
+  }
+};
+
+
+// ==========================================
+// 4–5 DAYS SENSOR DATA → AI PREDICTION
+// ==========================================
+
+export const predictPlantHealth = async ({
+  plant,
+  sensorData,
+  careHistory = [],
+}) => {
+
+  try {
+
+    const formattedSensorData =
+      sensorData.map((item) => ({
+        date: item.recordedAt,
+        soilMoisture:
+          item.soilMoisture,
+        temperature:
+          item.temperature,
+        humidity:
+          item.humidity,
+      }));
+
+
+    const formattedCareHistory =
+      careHistory.map((item) => ({
+        date: item.performedAt,
+        careType: item.careType,
+        notes: item.notes,
+      }));
+
+
+    const response =
+      await client.responses.create({
+
+        model: MODEL,
+
+        input: `
+
+You are an AI plant-health prediction system
+for a smart irrigation application called EcoMinds.
+
+Analyze the plant and its recent sensor/care history.
+
+PLANT:
+
+Name:
+${plant.plantName}
+
+Type:
+${plant.plantType || "Unknown"}
+
+Watering frequency:
+${plant.wateringFrequency || "Unknown"} days
+
+
+SENSOR HISTORY:
+
+${JSON.stringify(
+  formattedSensorData,
+  null,
+  2
+)}
+
+
+CARE HISTORY:
+
+${JSON.stringify(
+  formattedCareHistory,
+  null,
+  2
+)}
+
+
+Return ONLY valid JSON:
+
+{
+  "healthScore": 0,
+  "status": "healthy",
+  "riskLevel": "low",
+  "trend": "stable",
+  "analysis": "",
+  "recommendation": "",
+  "factors": [
+    {
+      "factor": "",
+      "impact": "positive"
+    }
+  ],
+  "prediction": "",
+  "wateringNeeded": false,
+  "suggestedWateringReason": "",
+  "dataPointsUsed": 0
+}
+
+
+Allowed values:
+
+status:
+- healthy
+- warning
+- critical
+
+riskLevel:
+- low
+- medium
+- high
+
+trend:
+- improving
+- stable
+- declining
+
+Rules:
+
+1. healthScore must be 0–100.
+2. Use the actual sensor history.
+3. Look for declining soil moisture.
+4. Look for prolonged high temperature.
+5. Look for unusually low humidity.
+6. Detect possible overwatering if moisture remains very high.
+7. Consider care history.
+8. Do not claim certainty.
+9. Explain why the prediction was made.
+10. If there is insufficient data, clearly mention it.
+`,
+
+      });
+
+
+    const text =
+      response.output_text;
+
+
+    return JSON.parse(text);
+
+  } catch (error) {
+
+    console.error(
+      "AI health prediction error:",
+      error
+    );
+
+    throw new Error(
+      "Failed to predict plant health"
+    );
   }
 };

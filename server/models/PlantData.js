@@ -17,17 +17,17 @@ const plantDataSchema = new mongoose.Schema(
 
     soilMoisture: {
       type: Number,
-      required: true,
+      default: null,
     },
 
     temperature: {
       type: Number,
-      required: true,
+      default: null,
     },
 
     humidity: {
       type: Number,
-      required: true,
+      default: null,
     },
 
     light: {

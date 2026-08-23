@@ -24,6 +24,11 @@ const plantSchema = new mongoose.Schema(
       default: "",
     },
 
+    image: {
+      type: String,
+      default: "",
+    },
+
     wateringFrequency: {
       type: Number,
       default: 7,
@@ -38,6 +43,30 @@ const plantSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    healthScore: {
+  type: Number,
+  default: 0,
+},
+
+health: {
+  type: String,
+  default: "Unknown",
+},
+
+lastHealthCheck: {
+  type: Date,
+  default: null,
+},
+
+healthProblems: {
+  type: [String],
+  default: [],
+},
+
+healthTips: {
+  type: [String],
+  default: [],
+},
   },
   {
     timestamps: true,

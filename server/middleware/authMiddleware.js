@@ -1,23 +1,26 @@
-export const requireAuth = async (req, res, next) => {
-  try {
-    const { userId } = await req.auth();
+import { getAuth } from "@clerk/express";
 
-    if (!userId) {
+export const requireAuth = (req, res, next) => {
+  try {
+    const { isAuthenticated, userId } = getAuth(req);
+
+    if (!isAuthenticated || !userId) {
       return res.status(401).json({
         success: false,
         message: "Authentication required",
       });
     }
 
+    // Controller ke liye userId available rahega
     req.userId = userId;
 
     next();
   } catch (error) {
-    console.error("Authentication error:", error);
+    console.error("Auth middleware error:", error);
 
-    res.status(401).json({
+    return res.status(401).json({
       success: false,
-      message: "Invalid authentication",
+      message: "Authentication failed",
     });
   }
 };

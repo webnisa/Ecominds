@@ -1,398 +1,926 @@
-import PlantData from "../models/PlantData.js";
+import OpenAI from "openai";
+import fs from "fs";
+import path from "path";
+
+// ============================================================
+// OPENAI CLIENT
+// ============================================================
+
+if (!process.env.OPENAI_API_KEY) {
+  console.warn(
+    "⚠️ OPENAI_API_KEY is missing. Image AI will not work."
+  );
+}
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
 
-// ==========================================
-// ANALYZE PLANT HEALTH
-// ==========================================
+// ============================================================
+// JSON HELPER
+// ============================================================
 
-export const analyzePlantHealth = async ({
-  plantId,
-  userId,
-}) => {
+function extractJSON(text) {
+  if (!text) {
+    throw new Error("AI returned an empty response.");
+  }
+
+  let cleaned = text.trim();
+
+  cleaned = cleaned
+    .replace(/^```json\s*/i, "")
+    .replace(/^```\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
+
   try {
+    return JSON.parse(cleaned);
+  } catch (error) {
+    console.error("❌ AI JSON parse failed:");
+    console.error(cleaned);
 
-    const history =
-      await PlantData.find({
-        plantId,
-        userId,
-      })
-        .sort({
-          recordedAt: -1,
-        })
-        .limit(7);
+    throw new Error("AI returned invalid JSON.");
+  }
+}
 
 
-    if (history.length === 0) {
+// ============================================================
+// IMAGE NORMALIZER
+// Accepts:
+// 1. Multer req.file
+// 2. data:image/... base64
+// 3. normal base64
+// ============================================================
+
+function normalizeImage(image) {
+
+  if (!image) {
+    throw new Error("Plant image is required.");
+  }
+
+
+  // ========================================================
+  // MULTER FILE OBJECT
+  // ========================================================
+
+  if (
+    typeof image === "object" &&
+    image.path
+  ) {
+
+    console.log("📦 Processing Multer image:");
+
+    console.log({
+      path: image.path,
+      mimetype: image.mimetype,
+      originalname: image.originalname,
+      size: image.size,
+    });
+
+
+    const imagePath = path.resolve(
+      image.path
+    );
+
+
+    if (!fs.existsSync(imagePath)) {
+
+      console.error(
+        "❌ Image file does not exist:",
+        imagePath
+      );
+
+      throw new Error(
+        `Uploaded image file not found: ${imagePath}`
+      );
+    }
+
+
+    const buffer =
+      fs.readFileSync(imagePath);
+
+
+    if (!buffer || buffer.length === 0) {
+
+      throw new Error(
+        "Uploaded image file is empty."
+      );
+    }
+
+
+    // ------------------------------------------------------
+    // MIME TYPE
+    // ------------------------------------------------------
+
+    let mimeType =
+      image.mimetype;
+
+
+    // Sometimes multer may not provide correct type
+    if (
+      !mimeType ||
+      !mimeType.startsWith("image/")
+    ) {
+
+      const extension =
+        path.extname(
+          image.originalname || ""
+        ).toLowerCase();
+
+
+      const mimeMap = {
+
+        ".jpg":
+          "image/jpeg",
+
+        ".jpeg":
+          "image/jpeg",
+
+        ".png":
+          "image/png",
+
+        ".webp":
+          "image/webp",
+
+        ".gif":
+          "image/gif",
+
+      };
+
+
+      mimeType =
+        mimeMap[extension] ||
+        "image/jpeg";
+    }
+
+
+    console.log(
+      "🖼️ Image MIME:",
+      mimeType
+    );
+
+
+    // ------------------------------------------------------
+    // BASE64
+    // ------------------------------------------------------
+
+    const base64 =
+      buffer.toString("base64");
+
+
+    return {
+      dataUrl:
+        `data:${mimeType};base64,${base64}`,
+
+      filePath:
+        imagePath,
+    };
+  }
+
+
+  // ========================================================
+  // STRING IMAGE
+  // ========================================================
+
+  if (typeof image === "string") {
+
+    // Already data URL
+    if (
+      image.startsWith(
+        "data:image/"
+      )
+    ) {
 
       return {
-        healthScore: 0,
-
-        status: "unknown",
-
-        riskLevel: "unknown",
-
-        analysis:
-          "Not enough sensor data available.",
-
-        recommendation:
-          "Wait for sensor data to be collected.",
-
-        factors: {},
-
-        dataPointsUsed: 0,
+        dataUrl: image,
+        filePath: null,
       };
     }
 
 
-    // Reverse for oldest → newest
-    const data =
-      [...history].reverse();
+    // Plain base64
+    return {
+      dataUrl:
+        `data:image/jpeg;base64,${image}`,
+
+      filePath: null,
+    };
+  }
 
 
-    // ==========================================
-    // LATEST VALUES
-    // ==========================================
-
-    const latest =
-      data[data.length - 1];
+  throw new Error(
+    "Invalid image format."
+  );
+}
 
 
-    const moisture =
-      Number(latest.soilMoisture);
+// ============================================================
+// REAL IMAGE AI ANALYSIS
+// ============================================================
 
-    const temperature =
-      Number(latest.temperature);
+export async function analyzePlantImage(image) {
 
-    const humidity =
-      Number(latest.humidity);
+  try {
 
-
-    // ==========================================
-    // SCORE
-    // ==========================================
-
-    let score = 100;
-
-    const problems = [];
-
-    let moistureFactor = "Normal";
-    let temperatureFactor = "Normal";
-    let humidityFactor = "Normal";
-    let wateringFactor = "Normal";
+    console.log(
+      "🌱 Starting REAL plant image analysis..."
+    );
 
 
-    // ==========================================
-    // MOISTURE ANALYSIS
-    // ==========================================
+    // ========================================================
+    // API KEY
+    // ========================================================
 
-    if (moisture < 20) {
+    if (!process.env.OPENAI_API_KEY) {
 
-      score -= 35;
-
-      moistureFactor =
-        "Very low soil moisture";
-
-      problems.push(
-        "soil moisture is very low"
-      );
-
-    } else if (moisture < 30) {
-
-      score -= 20;
-
-      moistureFactor =
-        "Low soil moisture";
-
-      problems.push(
-        "soil moisture is low"
-      );
-
-    } else if (moisture > 85) {
-
-      score -= 35;
-
-      moistureFactor =
-        "Very high soil moisture";
-
-      problems.push(
-        "soil may be overwatered"
-      );
-
-    } else if (moisture > 75) {
-
-      score -= 15;
-
-      moistureFactor =
-        "High soil moisture";
-
-    }
-
-
-    // ==========================================
-    // TEMPERATURE
-    // ==========================================
-
-    if (temperature > 40) {
-
-      score -= 25;
-
-      temperatureFactor =
-        "Very high temperature";
-
-      problems.push(
-        "temperature is very high"
-      );
-
-    } else if (temperature > 35) {
-
-      score -= 10;
-
-      temperatureFactor =
-        "High temperature";
-
-    } else if (temperature < 10) {
-
-      score -= 20;
-
-      temperatureFactor =
-        "Very low temperature";
-
-      problems.push(
-        "temperature is very low"
+      throw new Error(
+        "OPENAI_API_KEY is missing in server environment."
       );
     }
 
 
-    // ==========================================
-    // HUMIDITY
-    // ==========================================
+    // ========================================================
+    // NORMALIZE IMAGE
+    // ========================================================
 
-    if (humidity < 25) {
-
-      score -= 15;
-
-      humidityFactor =
-        "Low humidity";
-
-      problems.push(
-        "humidity is low"
-      );
-
-    } else if (humidity > 90) {
-
-      score -= 15;
-
-      humidityFactor =
-        "Very high humidity";
-
-    }
+    const normalized =
+      normalizeImage(image);
 
 
-    // ==========================================
-    // NO WATER FOR MULTIPLE DAYS
-    // ==========================================
-
-    let dryDays = 0;
-
-    for (let i = data.length - 1; i >= 0; i--) {
-
-      if (
-        Number(data[i].soilMoisture) < 30
-      ) {
-
-        dryDays++;
-
-      } else {
-
-        break;
-
-      }
-    }
+    const imageData =
+      normalized.dataUrl;
 
 
-    if (dryDays >= 4) {
-
-      score -= 25;
-
-      wateringFactor =
-        `${dryDays} consecutive days of low moisture`;
-
-      problems.push(
-        `plant has had low moisture for ${dryDays} consecutive days`
-      );
-
-    } else if (dryDays >= 2) {
-
-      score -= 10;
-
-      wateringFactor =
-        `${dryDays} consecutive days of low moisture`;
-
-    }
+    console.log(
+      "✅ Image converted successfully"
+    );
 
 
-    // ==========================================
-    // OVERWATERING TREND
-    // ==========================================
+    // ========================================================
+    // PROMPT
+    // ========================================================
 
-    let wetDays = 0;
+    const prompt = `
 
-    for (let i = data.length - 1; i >= 0; i--) {
+You are an expert plant health assistant.
 
-      if (
-        Number(data[i].soilMoisture) > 85
-      ) {
+Analyze the uploaded plant photograph carefully.
 
-        wetDays++;
+IMPORTANT:
 
-      } else {
+Actually inspect the visible plant.
 
-        break;
+Do NOT automatically call every plant healthy.
 
-      }
-    }
+Look for visible signs such as:
+
+- yellow leaves
+- brown leaves
+- dry leaves
+- wilting
+- drooping
+- holes
+- spots
+- discoloration
+- pest damage
+- fungal-looking symptoms
+- weak growth
+- dehydration
+- dead-looking portions
+- overwatering signs
+
+If the image does not provide enough evidence,
+say so.
+
+Never invent a disease that cannot reasonably
+be seen from the photograph.
+
+Plant health categories:
+
+Healthy
+Good
+Needs Attention
+Poor
+Critical
+Possibly Dead
+Uncertain
+
+Health score must reflect visible condition.
+
+A severely dry or dead-looking plant MUST NOT
+receive a high score.
+
+Return ONLY valid JSON.
+
+Use EXACTLY this structure:
+
+{
+  "plantName": "string",
+  "plantType": "string",
+  "confidence": 0,
+  "healthStatus": "Healthy",
+  "healthScore": 0,
+  "visibleProblems": [],
+  "wateringAdvice": "string",
+  "sunlightAdvice": "string",
+  "soilAdvice": "string",
+  "careTips": [],
+  "overallRecommendation": "string"
+}
+
+HEALTH SCORE:
+
+90-100:
+Very healthy with no meaningful visible problems.
+
+75-89:
+Generally healthy with minor issues.
+
+55-74:
+Some visible problems and needs attention.
+
+30-54:
+Clearly stressed or unhealthy.
+
+10-29:
+Severely damaged.
+
+0-9:
+Very likely dead or almost completely dead.
+
+If the plant appears dead, extremely dry,
+collapsed or severely damaged,
+DO NOT return Healthy.
+
+Analyze ONLY what can reasonably be inferred
+from the image.
+
+`;
 
 
-    if (wetDays >= 3) {
+    // ========================================================
+    // OPENAI REQUEST
+    // ========================================================
 
-      score -= 20;
-
-      wateringFactor =
-        `${wetDays} consecutive days of very high moisture`;
-
-      problems.push(
-        "soil has remained excessively wet"
-      );
-    }
+    console.log(
+      "🤖 Sending image to OpenAI..."
+    );
 
 
-    // ==========================================
-    // LIMIT SCORE
-    // ==========================================
+    const response =
+      await openai.responses.create({
 
-    score =
+        model:
+          process.env.OPENAI_VISION_MODEL ||
+          "gpt-5.6-luna",
+
+        input: [
+
+          {
+            role: "user",
+
+            content: [
+
+              {
+                type: "input_text",
+
+                text: prompt,
+              },
+
+              {
+                type: "input_image",
+
+                image_url: imageData,
+              },
+
+            ],
+          },
+
+        ],
+
+      });
+
+
+    // ========================================================
+    // RAW RESPONSE
+    // ========================================================
+
+    const rawText =
+      response.output_text;
+
+
+    console.log(
+      "🤖 Raw AI image response:",
+      rawText
+    );
+
+
+    // ========================================================
+    // PARSE
+    // ========================================================
+
+    const result =
+      extractJSON(rawText);
+
+
+    // ========================================================
+    // HEALTH SCORE
+    // ========================================================
+
+    const healthScore =
       Math.max(
         0,
-        Math.min(100, score)
+        Math.min(
+          100,
+          Number(
+            result.healthScore
+          ) || 0
+        )
       );
 
 
-    // ==========================================
-    // STATUS
-    // ==========================================
+    // ========================================================
+    // FINAL RESULT
+    // ========================================================
 
-    let status;
-    let riskLevel;
+    const finalResult = {
 
-    if (score >= 75) {
+      plantName:
+        result.plantName ||
+        "Unknown Plant",
 
-      status = "healthy";
-      riskLevel = "low";
+      plantType:
+        result.plantType ||
+        "Unknown",
 
-    } else if (score >= 50) {
+      confidence:
+        Math.max(
+          0,
+          Math.min(
+            100,
+            Number(
+              result.confidence
+            ) || 0
+          )
+        ),
 
-      status = "warning";
-      riskLevel = "medium";
+      healthStatus:
+        result.healthStatus ||
+        "Uncertain",
 
-    } else {
+      healthScore,
 
-      status = "critical";
-      riskLevel = "high";
-    }
+      visibleProblems:
+        Array.isArray(
+          result.visibleProblems
+        )
+          ? result.visibleProblems
+          : [],
 
+      wateringAdvice:
+        result.wateringAdvice ||
+        "Monitor soil moisture before watering.",
 
-    // ==========================================
-    // ANALYSIS
-    // ==========================================
+      sunlightAdvice:
+        result.sunlightAdvice ||
+        "Provide appropriate light for the plant.",
 
-    let analysis;
+      soilAdvice:
+        result.soilAdvice ||
+        "Keep soil well-drained.",
 
-    if (problems.length === 0) {
+      careTips:
+        Array.isArray(
+          result.careTips
+        )
+          ? result.careTips
+          : [],
 
-      analysis =
-        "Current sensor conditions look stable. The plant appears healthy.";
+      overallRecommendation:
+        result.overallRecommendation ||
+        "Continue monitoring the plant regularly.",
 
-    } else {
-
-      analysis =
-        `The latest sensor history indicates that ${problems.join(
-          ", "
-        )}.`;
-    }
-
-
-    // ==========================================
-    // RECOMMENDATION
-    // ==========================================
-
-    let recommendation;
-
-    if (dryDays >= 4) {
-
-      recommendation =
-        "Water the plant as soon as possible. If low moisture continues, the plant may become severely stressed.";
-
-    } else if (moisture < 20) {
-
-      recommendation =
-        "The plant likely needs water soon. Check the soil and water if required.";
-
-    } else if (wetDays >= 3 || moisture > 85) {
-
-      recommendation =
-        "Do not add more water for now. Check drainage and allow the soil to dry.";
-
-    } else if (temperature > 40) {
-
-      recommendation =
-        "Move the plant away from excessive heat and monitor its condition.";
-
-    } else {
-
-      recommendation =
-        "Continue regular plant care and monitor the sensor readings.";
-    }
-
-
-    return {
-
-      healthScore: score,
-
-      status,
-
-      riskLevel,
-
-      analysis,
-
-      recommendation,
-
-      factors: {
-
-        moisture:
-          moistureFactor,
-
-        temperature:
-          temperatureFactor,
-
-        humidity:
-          humidityFactor,
-
-        watering:
-          wateringFactor,
-
-      },
-
-      dataPointsUsed:
-        data.length,
     };
+
+
+    console.log(
+      "🤖 AI RESULT:",
+      finalResult
+    );
+
+
+    // ========================================================
+    // DELETE TEMP IMAGE
+    // ========================================================
+
+    if (normalized.filePath) {
+
+      try {
+
+        fs.unlinkSync(
+          normalized.filePath
+        );
+
+        console.log(
+          "🗑️ Temporary image deleted"
+        );
+
+      } catch (deleteError) {
+
+        console.warn(
+          "⚠️ Could not delete temporary image:",
+          deleteError.message
+        );
+
+      }
+    }
+
+
+    return finalResult;
+
 
   } catch (error) {
 
     console.error(
-      "Plant health analysis error:",
+      "❌ REAL IMAGE AI ERROR:",
       error
     );
 
     throw error;
   }
-};
+}
+
+
+// ============================================================
+// DAILY SENSOR HEALTH ANALYSIS
+// ============================================================
+
+export async function analyzePlantHealth(
+  plant
+) {
+
+  if (!plant) {
+    throw new Error(
+      "Plant data is required."
+    );
+  }
+
+
+  const moisture =
+    Number(
+      plant.moisture ?? 0
+    );
+
+  const temperature =
+    Number(
+      plant.temperature ?? 0
+    );
+
+  const humidity =
+    Number(
+      plant.humidity ?? 0
+    );
+
+
+  let score = 100;
+
+  const problems = [];
+
+  const tips = [];
+
+
+  // ========================================================
+  // MOISTURE
+  // ========================================================
+
+  if (moisture < 15) {
+
+    score -= 40;
+
+    problems.push(
+      "Soil moisture is extremely low."
+    );
+
+    tips.push(
+      "The plant may be severely dehydrated. Check the soil and water appropriately."
+    );
+
+  } else if (moisture < 25) {
+
+    score -= 30;
+
+    problems.push(
+      "Soil is very dry."
+    );
+
+    tips.push(
+      "The plant may need watering soon."
+    );
+
+  } else if (moisture < 35) {
+
+    score -= 15;
+
+    problems.push(
+      "Soil moisture is low."
+    );
+
+    tips.push(
+      "Monitor soil moisture and water if required."
+    );
+
+  } else if (moisture > 90) {
+
+    score -= 35;
+
+    problems.push(
+      "Soil is excessively wet."
+    );
+
+    tips.push(
+      "Avoid additional watering and check drainage."
+    );
+
+  } else if (moisture > 80) {
+
+    score -= 20;
+
+    problems.push(
+      "Soil moisture is very high."
+    );
+
+    tips.push(
+      "Avoid overwatering."
+    );
+
+  } else if (moisture > 70) {
+
+    score -= 10;
+
+    problems.push(
+      "Soil moisture is relatively high."
+    );
+
+    tips.push(
+      "Allow the soil to dry appropriately before watering again."
+    );
+  }
+
+
+  // ========================================================
+  // TEMPERATURE
+  // ========================================================
+
+  if (temperature < 5) {
+
+    score -= 35;
+
+    problems.push(
+      "Temperature is extremely low."
+    );
+
+    tips.push(
+      "Protect the plant from extreme cold."
+    );
+
+  } else if (temperature < 10) {
+
+    score -= 20;
+
+    problems.push(
+      "Temperature is low."
+    );
+
+  } else if (temperature > 40) {
+
+    score -= 35;
+
+    problems.push(
+      "Temperature is extremely high."
+    );
+
+    tips.push(
+      "Protect the plant from extreme heat."
+    );
+
+  } else if (temperature > 35) {
+
+    score -= 20;
+
+    problems.push(
+      "Temperature is high."
+    );
+
+    tips.push(
+      "Provide shade and monitor heat stress."
+    );
+
+  } else if (temperature > 32) {
+
+    score -= 10;
+
+    problems.push(
+      "Temperature is somewhat high."
+    );
+  }
+
+
+  // ========================================================
+  // HUMIDITY
+  // ========================================================
+
+  if (humidity < 20) {
+
+    score -= 25;
+
+    problems.push(
+      "Air humidity is very low."
+    );
+
+    tips.push(
+      "Monitor the plant for signs of dryness."
+    );
+
+  } else if (humidity < 30) {
+
+    score -= 15;
+
+    problems.push(
+      "Air humidity is low."
+    );
+
+  } else if (humidity > 90) {
+
+    score -= 20;
+
+    problems.push(
+      "Air humidity is extremely high."
+    );
+
+    tips.push(
+      "Improve ventilation and air circulation."
+    );
+
+  } else if (humidity > 80) {
+
+    score -= 10;
+
+    problems.push(
+      "Air humidity is high."
+    );
+
+    tips.push(
+      "Maintain good air circulation."
+    );
+  }
+
+
+  // ========================================================
+  // FINAL SCORE
+  // ========================================================
+
+  score =
+    Math.max(
+      0,
+      Math.min(
+        100,
+        Math.round(score)
+      )
+    );
+
+
+  // ========================================================
+  // STATUS
+  // ========================================================
+
+  let healthStatus;
+
+  if (score >= 85) {
+
+    healthStatus = "Healthy";
+
+  } else if (score >= 70) {
+
+    healthStatus = "Good";
+
+  } else if (score >= 45) {
+
+    healthStatus = "Needs Attention";
+
+  } else if (score >= 25) {
+
+    healthStatus = "Poor";
+
+  } else {
+
+    healthStatus = "Critical";
+  }
+
+
+  if (problems.length === 0) {
+
+    tips.push(
+      "Current sensor conditions look suitable. Continue regular monitoring."
+    );
+  }
+
+
+  return {
+
+    healthScore: score,
+
+    healthStatus,
+
+    visibleProblems:
+      problems,
+
+    careTips:
+      tips,
+
+    checkedAt:
+      new Date(),
+
+  };
+}
+
+
+// ============================================================
+// RECOMMENDATION
+// ============================================================
+
+export function getPlantHealthRecommendation(
+  healthResult
+) {
+
+  if (!healthResult) {
+
+    return "Unable to determine plant health.";
+  }
+
+
+  const {
+    healthScore,
+    visibleProblems = [],
+  } = healthResult;
+
+
+  if (healthScore >= 85) {
+
+    return (
+      "Your plant is currently doing well. " +
+      "Continue regular monitoring."
+    );
+  }
+
+
+  if (healthScore >= 70) {
+
+    return (
+      "Your plant is generally healthy, " +
+      "but keep monitoring its conditions."
+    );
+  }
+
+
+  if (healthScore >= 45) {
+
+    return (
+      "Your plant needs some attention. " +
+      visibleProblems.join(" ")
+    );
+  }
+
+
+  if (healthScore >= 25) {
+
+    return (
+      "Your plant appears stressed. " +
+      "Check watering, temperature and humidity."
+    );
+  }
+
+
+  return (
+    "Your plant is in critical condition. " +
+    "Immediate inspection is recommended."
+  );
+}
+
+
+// ============================================================
+// BACKWARD COMPATIBILITY
+// ============================================================
+
+export async function predictPlantHealth(
+  plant
+) {
+
+  console.log(
+    "🌱 Predicting plant health..."
+  );
+
+  return analyzePlantHealth(
+    plant
+  );
+}

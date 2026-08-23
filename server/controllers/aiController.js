@@ -1,300 +1,60 @@
-import Plant from "../models/Plant.js";
-import PlantHealth from "../models/PlantHealth.js";
-import Reminder from "../models/Reminder.js";
+import { analyzePlantImage as analyzeImageService } from "../services/plantHealthService.js";
 
-import {
-  analyzePlantHealth,
-} from "../services/plantHealthService.js";
+// ============================================================
+// AI IMAGE ANALYSIS
+// POST /api/ai/analyze-image
+// ============================================================
 
-
-// ==========================================
-// ANALYZE PLANT
-// ==========================================
-
-export const analyzePlant = async (
-  req,
-  res
-) => {
+export async function analyzePlantImage(req, res) {
   try {
+    console.log("🌱 AI IMAGE REQUEST RECEIVED");
 
-    const clerkId =
-      req.userId;
+    // --------------------------------------------------------
+    // Check uploaded file
+    // --------------------------------------------------------
 
-    const {
-      plantId,
-    } = req.params;
+    if (!req.file) {
+      console.log("❌ No image received");
 
-
-    // ==========================================
-    // CHECK PLANT
-    // ==========================================
-
-    const plant =
-      await Plant.findOne({
-        _id: plantId,
-        userId: clerkId,
-      });
-
-
-    if (!plant) {
-
-      return res.status(404).json({
+      return res.status(400).json({
         success: false,
-        message: "Plant not found",
+        message: "Please upload a plant image.",
       });
-
     }
 
+    console.log("📦 Multer file object received");
+    console.log("📸 File:", {
+      fieldname: req.file.fieldname,
+      originalname: req.file.originalname,
+      mimetype: req.file.mimetype,
+      path: req.file.path,
+      size: req.file.size,
+    });
 
-    // ==========================================
-    // ANALYZE HISTORY
-    // ==========================================
+    // --------------------------------------------------------
+    // Send complete multer file object to service
+    // --------------------------------------------------------
 
-    const result =
-      await analyzePlantHealth({
-        plantId,
-        userId: clerkId,
-      });
+    const result = await analyzeImageService(req.file);
 
+    console.log("🤖 AI RESULT:", result);
 
-    // ==========================================
-    // SAVE RESULT
-    // ==========================================
-
-    const health =
-      await PlantHealth.create({
-
-        userId: clerkId,
-
-        plantId,
-
-        healthScore:
-          result.healthScore,
-
-        status:
-          result.status,
-
-        riskLevel:
-          result.riskLevel,
-
-        analysis:
-          result.analysis,
-
-        recommendation:
-          result.recommendation,
-
-        factors:
-          result.factors,
-
-        dataPointsUsed:
-          result.dataPointsUsed,
-
-        generatedAt:
-          new Date(),
-
-      });
-
-
-    res.json({
-
+    return res.status(200).json({
       success: true,
-
-      message:
-        "Plant health analysis completed 🤖🌱",
-
-      health,
-
+      suggestion: result,
     });
 
   } catch (error) {
+    console.error("❌ REAL IMAGE AI ERROR:", error);
 
-    console.error(
-      "AI plant analysis error:",
-      error
-    );
-
-    res.status(500).json({
-
+    return res.status(500).json({
       success: false,
-
       message:
-        "Failed to analyze plant health",
-
-    });
-
-  }
-  // ==========================================
-// CREATE REMINDER FROM AI RESULT
-// ==========================================
-
-if (
-  result.riskLevel === "high" ||
-  result.status === "critical"
-) {
-
-  const existingReminder =
-    await Reminder.findOne({
-      userId: clerkId,
-      plantId,
-      type: "ai_health_warning",
-      isRead: false,
-    });
-
-
-  if (!existingReminder) {
-
-    await Reminder.create({
-
-      userId: clerkId,
-
-      plantId,
-
-      type:
-        "ai_health_warning",
-
-      title:
-        "Plant health warning 🤖🌱",
-
-      message:
-        result.recommendation,
-
-      priority:
-        "high",
-
-      isRead:
-        false,
-
+        error?.message ||
+        "AI image analysis failed.",
+      error:
+        error?.message ||
+        "Unknown AI error",
     });
   }
 }
-};
-
-
-// ==========================================
-// GET LATEST HEALTH
-// ==========================================
-
-export const getLatestPlantHealth =
-  async (req, res) => {
-    try {
-
-      const clerkId =
-        req.userId;
-
-      const {
-        plantId,
-      } = req.params;
-
-
-      const health =
-        await PlantHealth.findOne({
-          userId: clerkId,
-          plantId,
-        })
-          .sort({
-            generatedAt: -1,
-          });
-
-
-      if (!health) {
-
-        return res.status(404).json({
-
-          success: false,
-
-          message:
-            "No health analysis found",
-
-        });
-
-      }
-
-
-      res.json({
-
-        success: true,
-
-        health,
-
-      });
-
-    } catch (error) {
-
-      console.error(
-        "Get plant health error:",
-        error
-      );
-
-      res.status(500).json({
-
-        success: false,
-
-        message:
-          "Failed to fetch plant health",
-
-      });
-
-    }
-  };
-
-
-// ==========================================
-// GET HEALTH HISTORY
-// ==========================================
-
-export const getPlantHealthHistory =
-  async (req, res) => {
-    try {
-
-      const clerkId =
-        req.userId;
-
-      const {
-        plantId,
-      } = req.params;
-
-
-      const history =
-        await PlantHealth.find({
-
-          userId:
-            clerkId,
-
-          plantId,
-
-        })
-          .sort({
-            generatedAt: -1,
-          })
-          .limit(30);
-
-
-      res.json({
-
-        success: true,
-
-        count:
-          history.length,
-
-        history,
-
-      });
-
-    } catch (error) {
-
-      console.error(
-        "Health history error:",
-        error
-      );
-
-      res.status(500).json({
-
-        success: false,
-
-        message:
-          "Failed to fetch health history",
-
-      });
-
-    }
-  };
